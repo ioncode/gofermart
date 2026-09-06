@@ -16,7 +16,7 @@ type Server struct {
 }
 
 // NewServer собирает http.Server, подключает middleware и настраивает маршруты
-func NewServer(port string, userHandler *handler.UserHandler) *Server {
+func NewServer(addr string, userHandler *handler.UserHandler) *Server {
 	r := chi.NewRouter()
 
 	// Настройка стандартных Middleware для логирования и стабильности
@@ -47,7 +47,7 @@ func NewServer(port string, userHandler *handler.UserHandler) *Server {
 
 	return &Server{
 		httpServer: &http.Server{
-			Addr:    ":" + port,
+			Addr:    addr,
 			Handler: r,
 		},
 	}
