@@ -5,7 +5,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -38,8 +37,6 @@ func RunMigrations(databaseURL string) error {
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
-
-	log.Println("[Repository] Миграции базы данных успешно применены.")
 	return nil
 }
 

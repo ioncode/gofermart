@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -48,7 +47,6 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 		// Любая другая непредвиденная ошибка (ошибка БД и т.д.) -> 500
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		log.Println(err)
 		return
 	}
 

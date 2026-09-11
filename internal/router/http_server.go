@@ -3,26 +3,28 @@ package router
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/ioncode/gofermart/internal/handler"
+	"github.com/ioncode/ulog/v3"
 )
 
 type Server struct {
 	httpServer *http.Server
+	logger     ulog.Logger
 }
 
 // NewServer собирает http.Server, подключает middleware и настраивает маршруты
-func NewServer(addr string, userHandler *handler.UserHandler) *Server {
+func NewServer(addr string, userHandler *handler.UserHandler, logger ulog.Logger) *Server {
+	logger = logger.With(ulog.String("component", "HTTP server"))
 	r := chi.NewRouter()
 
 	// Настройка стандартных Middleware для логирования и стабильности
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	r.Use(ulog.TraceIDMiddleware)
+	r.Use(ulog.RecoveryMiddleware(logger))
+	r.Use(ulog.LoggingMiddleware(logger))
 
 	// Группировка эндпоинтов согласно ТЗ накопительной системы
 	r.Route("/api/user", func(r chi.Router) {
@@ -46,6 +48,7 @@ func NewServer(addr string, userHandler *handler.UserHandler) *Server {
 	})
 
 	return &Server{
+		logger: logger,
 		httpServer: &http.Server{
 			Addr:    addr,
 			Handler: r,
@@ -55,14 +58,15 @@ func NewServer(addr string, userHandler *handler.UserHandler) *Server {
 
 // Start запускает сервер в текущей горутине
 func (s *Server) Start() {
-	log.Printf("[Router] Gophermart API сервер запущен на %s", s.httpServer.Addr)
+	s.logger.Info("Gophermart API сервер запущен", ulog.String("Адрес сервера", s.httpServer.Addr))
 	if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("[Router] Критическая ошибка при работе сервера: %v", err)
+		s.logger.Error("Критическая ошибка при работе сервера", err)
+		os.Exit(1)
 	}
 }
 
 // Stop выполняет Graceful Shutdown с использованием переданного контекста таймаута
 func (s *Server) Stop(ctx context.Context) error {
-	log.Println("[Router] Завершение работы HTTP-сервера и обработка оставшихся запросов...")
+	s.logger.Info("Завершение и обработка оставшихся запросов...")
 	return s.httpServer.Shutdown(ctx)
 }
