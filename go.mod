@@ -8,6 +8,7 @@ require (
 )
 
 require (
+	github.com/goccy/go-json v0.10.6
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/ioncode/confy v1.0.2
 	github.com/ioncode/ulog/v3 v3.0.0
@@ -17,7 +18,6 @@ require (
 )
 
 require (
-	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
