@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/ioncode/gofermart/internal/handler"
 	"github.com/ioncode/ulog/v3"
 )
@@ -29,8 +30,8 @@ func NewServer(addr string, userHandler *handler.UserHandler, logger ulog.Logger
 	// Группировка эндпоинтов согласно ТЗ накопительной системы
 	r.Route("/api/user", func(r chi.Router) {
 		// Публичные эндпоинты (Аутентификация и регистрация)
-		r.Post("/register", userHandler.Register)
-		// r.Post("/login", userHandler.Login)
+		r.With(middleware.AllowContentType("application/json")).Post("/register", userHandler.Register)
+		r.With(middleware.AllowContentType("application/json")).Post("/login", userHandler.Login)
 
 		// // Защищенные эндпоинты (доступны только авторизованным пользователям)
 		// r.Group(func(r chi.Router) {

@@ -16,12 +16,6 @@ type RegisterRequest struct {
 }
 
 func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
-	// Проверяем тип контента (можно сделать строже в middleware)
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-		http.Error(w, "Invalid Content-Type", http.StatusBadRequest)
-		return
-	}
-
 	var req RegisterRequest
 	// Читаем JSON. Если формат битый -> 400 Bad Request
 	if !ReadJSONOptimized(w, r, &req) {

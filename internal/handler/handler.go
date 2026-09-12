@@ -5,8 +5,8 @@ import (
 )
 
 type LoyaltyService interface {
-	Register(ctx context.Context, login, password string) (token string, err error)
-	// Login(ctx context.Context, login, password string) (token string, err error)
+	Register(ctx context.Context, login string, password string) (token string, err error)
+	Authenticate(ctx context.Context, login string, password string) (token string, err error)
 	// UploadOrder(ctx context.Context, userID string, orderID string) error
 	// GetOrders(ctx context.Context, userID string) ([]byte, error)
 	// GetBalance(ctx context.Context, userID string) ([]byte, error)
@@ -16,8 +16,9 @@ type LoyaltyService interface {
 
 type UserHandler struct {
 	service LoyaltyService
+	isProd  bool // Флаг окружения (true активирует Secure: true для HTTPS в продакшене)
 }
 
-func NewUserHandler(svc LoyaltyService) *UserHandler {
+func NewUserHandler(svc LoyaltyService, isProd bool) *UserHandler {
 	return &UserHandler{service: svc}
 }

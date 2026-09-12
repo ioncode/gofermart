@@ -67,7 +67,7 @@ func main() {
 	// 4. Сборка слоев приложения согласно Чистой Архитектуре (Dependency Injection).
 	repo := repository.NewPostgresRepository(pool)
 	loyaltySvc := service.NewLoyaltyService(repo, cfg.JWTSecret, cfg.TokenTTL, logger)
-	userHandler := handler.NewUserHandler(loyaltySvc)
+	userHandler := handler.NewUserHandler(loyaltySvc, false)
 	server := router.NewServer(cfg.RunAddress, userHandler, logger)
 
 	// 5. Старт HTTP-сервера в отдельной горутине, чтобы не блокировать основной поток.

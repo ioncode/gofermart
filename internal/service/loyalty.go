@@ -40,7 +40,7 @@ type Claims struct {
 	UserID string `json:"user_id"`
 }
 
-func (s *LoyaltyService) Register(ctx context.Context, login, password string) (string, error) {
+func (s *LoyaltyService) Register(ctx context.Context, login string, password string) (string, error) {
 	// СОЗДАНИЕ САБЛОГГЕРА ДЛЯ БИЗНЕС-ЛОГИКИ
 	// Метод .With() привязывает login к контексту выполнения этой функции
 	log := s.logger.With(ulog.String("login", login))
@@ -104,4 +104,46 @@ func (s *LoyaltyService) generateJWT(userID string) (string, error) {
 	}
 
 	return signedToken, nil
+}
+
+// Authenticate проверяет учетные данные пользователя через Bcrypt.
+// В случае успеха генерирует и возвращает JWT-токен.
+func (s *LoyaltyService) Authenticate(ctx context.Context, login string, password string) (string, error) {
+	// Создаем контекстный логгер
+	log := s.logger.With(ulog.String("login", login))
+	log.Debug("Попытка аутентификации пользователя (Login)")
+
+	// 1. Получаем ID и хэш пароля
+	userID, passwordHash, err := s.userRepo.GetPasswordHash(ctx, login)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			log.Info("Пользователь с таким логином не найден")
+			return "", ErrInvalidCredentials // Превращаем в безопасную ошибку 401
+		}
+		log.Error("Системная ошибка при поиске хэша пароля в БД", err)
+		return "", fmt.Errorf("failed to get password hash: %w", err)
+	}
+	log.Debug("Пользователь найден, проверяем пароль...")
+
+	// 2. Сравниваем сырой пароль с хэшем из PostgreSQL с помощью bcrypt
+	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password))
+	if err != nil {
+		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+			log.Info("Передан неверный пароль")
+			return "", ErrInvalidCredentials // Снова возвращаем безопасную ошибку 401
+		}
+		log.Error("Критическая ошибка bcrypt верификации", err)
+		return "", fmt.Errorf("bcrypt verification failed: %w", err)
+	}
+	log.Debug("Пароль успешно подтвержден")
+
+	// 3. Генерируем JWT токен, переиспользуя приватный метод автора generateJWT
+	token, err := s.generateJWT(userID)
+	if err != nil {
+		log.Error("Не удалось сгенерировать JWT сессию", err)
+		return "", fmt.Errorf("failed to generate token for login: %w", err)
+	}
+	log.Debug("Аутентификация успешно завершена, JWT создан")
+
+	return token, nil
 }
