@@ -33,19 +33,18 @@ func NewServer(addr string, userHandler *handler.UserHandler, logger ulog.Logger
 		r.With(middleware.AllowContentType("application/json")).Post("/register", userHandler.Register)
 		r.With(middleware.AllowContentType("application/json")).Post("/login", userHandler.Login)
 
-		// // Защищенные эндпоинты (доступны только авторизованным пользователям)
-		// r.Group(func(r chi.Router) {
-		// 	// В будущем здесь подключается middleware проверки JWT/Cookie:
-		// 	// r.Use(authMiddleware)
+		// Защищенные эндпоинты (доступны только авторизованным пользователям)
+		r.Group(func(r chi.Router) {
+			r.Use(userHandler.AuthMiddleware)
 
-		// 	r.Post("/orders", userHandler.UploadOrder)
-		// 	r.Get("/orders", userHandler.GetOrders)
+			r.Post("/orders", userHandler.UploadOrder)
+			// r.Get("/orders", userHandler.GetOrders)
 
-		// 	r.Get("/balance", userHandler.GetBalance)
-		// 	r.Post("/balance/withdraw", userHandler.Withdraw)
+			// r.Get("/balance", userHandler.GetBalance)
+			// r.Post("/balance/withdraw", userHandler.Withdraw)
 
-		// 	r.Get("/withdrawals", userHandler.GetWithdrawals)
-		// })
+			// r.Get("/withdrawals", userHandler.GetWithdrawals)
+		})
 	})
 
 	return &Server{

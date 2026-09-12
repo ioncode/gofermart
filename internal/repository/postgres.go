@@ -10,6 +10,8 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/httpfs"
+	"github.com/ioncode/gofermart/internal/domain"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -96,4 +98,84 @@ func (r *PostgresRepository) GetPasswordHash(ctx context.Context, login string) 
 	}
 
 	return userID, hash, nil
+}
+
+// GetOrder ищет заказ по его уникальному номеру с использованием pgxpool
+func (r *PostgresRepository) GetOrder(ctx context.Context, orderID string) (domain.Order, error) {
+	query := `SELECT id, user_id, status, accrual, uploaded_at FROM orders WHERE id = $1`
+
+	var o domain.Order
+	// В pgx можно сканировать NUMERIC напрямую в float64, но если там NULL,
+	// лучше использовать указатель *float64, чтобы избежать падения
+	var accrual *float64
+
+	// ИСПРАВЛЕНО: QueryRowContext -> QueryRow
+	err := r.db.QueryRow(ctx, query, orderID).Scan(
+		&o.ID,
+		&o.UserID,
+		&o.Status,
+		&accrual,
+		&o.UploadedAt,
+	)
+
+	if err != nil {
+		// ИСПРАВЛЕНО: Проверка на отсутствие строк в pgx делается через pgx.ErrNoRows
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Order{}, ErrOrderNotFound
+		}
+		return domain.Order{}, fmt.Errorf("postgres: get order execution failed: %w", err)
+	}
+
+	if accrual != nil {
+		o.Accrual = *accrual
+	}
+
+	return o, nil
+}
+
+// CreateOrder сохраняет новый заказ в базу данных со статусом NEW
+func (r *PostgresRepository) CreateOrder(ctx context.Context, orderID string, userID string, status string) error {
+	query := `INSERT INTO orders (id, user_id, status, accrual) VALUES ($1, $2, $3, 0.00)`
+
+	// ИСПРАВЛЕНО: ExecContext -> Exec
+	_, err := r.db.Exec(ctx, query, orderID, userID, status)
+	if err != nil {
+		return fmt.Errorf("postgres: failed to insert new order: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateOrderAccrual обновляет статус заказа и увеличивает баланс пользователя внутри транзакции pgx
+func (r *PostgresRepository) UpdateOrderAccrual(ctx context.Context, orderID string, userID string, status string, accrual float64) error {
+	// 1. Стартуем транзакцию через pgxpool
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("postgres: cannot start transaction: %w", err)
+	}
+	// Гарантируем откат в случае ошибки
+	defer tx.Rollback(ctx)
+
+	// 2. Обновляем статус и сумму начисления в таблице заказов
+	orderQuery := `UPDATE orders SET status = $1, accrual = $2 WHERE id = $3`
+	_, err = tx.Exec(ctx, orderQuery, status, accrual, orderID)
+	if err != nil {
+		return fmt.Errorf("postgres: tx update order failed: %w", err)
+	}
+
+	// 3. Если баллы лояльности больше нуля, прибавляем их к балансу пользователя
+	if accrual > 0 {
+		userQuery := `UPDATE users SET balance = balance + $1 WHERE id = $2`
+		_, err = tx.Exec(ctx, userQuery, accrual, userID)
+		if err != nil {
+			return fmt.Errorf("postgres: tx update user balance failed: %w", err)
+		}
+	}
+
+	// 4. Фиксируем изменения в базе данных
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("postgres: tx commit failed: %w", err)
+	}
+
+	return nil
 }

@@ -13,8 +13,10 @@ import (
 )
 
 var (
-	ErrLoginConflict      = repository.ErrDuplicateLogin
-	ErrInvalidCredentials = errors.New("invalid login or password")
+	ErrLoginConflict            = repository.ErrDuplicateLogin
+	ErrInvalidCredentials       = errors.New("invalid login or password")
+	ErrOrderUploadedBySameUser  = errors.New("order already uploaded by this user")
+	ErrOrderUploadedByOtherUser = errors.New("order already uploaded by another user")
 )
 
 type LoyaltyService struct {
@@ -47,7 +49,7 @@ func (s *LoyaltyService) Register(ctx context.Context, login string, password st
 	log.Debug("Попытка регистрации нового пользователя")
 	exists, err := s.userRepo.CheckUserExists(ctx, login)
 	if err != nil {
-		s.logger.Error("Ошибка проверки существования пользователя", err)
+		log.Error("Ошибка проверки существования пользователя", err)
 		return "", fmt.Errorf("check user existence: %w", err)
 	} else {
 		log.Debug("Проверка сущестования пользователя успешно завершена")
@@ -146,4 +148,92 @@ func (s *LoyaltyService) Authenticate(ctx context.Context, login string, passwor
 	log.Debug("Аутентификация успешно завершена, JWT создан")
 
 	return token, nil
+}
+
+func (s *LoyaltyService) UploadOrder(ctx context.Context, userID string, orderID string) error {
+	// Создаем контекстный саблоггер
+	log := s.logger.With(
+		ulog.String("user_id", userID),
+		ulog.String("order_id", orderID),
+	)
+	log.Debug("Попытка загрузки нового номера заказа")
+
+	// 1. Проверяем существование заказа в базе данных через репозиторий
+	existingOrder, err := s.userRepo.GetOrder(ctx, orderID)
+	if err != nil {
+		// Если это не ошибка отсутствия записи, значит произошел системный сбой БД
+		if !errors.Is(err, repository.ErrOrderNotFound) {
+			log.Error("Системная ошибка при проверке существования заказа в БД", err)
+			return fmt.Errorf("failed to check order existence: %w", err)
+		}
+		// Если err == repository.ErrOrderNotFound, продолжаем выполнение: заказ абсолютно новый
+	} else {
+		// Заказ уже существует в системе. Проверяем, кто его владелец:
+		if existingOrder.UserID == userID {
+			log.Info("Заказ уже был загружен этим же пользователем ранее")
+			return ErrOrderUploadedBySameUser
+		}
+
+		log.Info("Конфликт: заказ уже загружен другим пользователем")
+		return ErrOrderUploadedByOtherUser
+	}
+
+	// 2. Сохраняем новый заказ в PostgreSQL со статусом "NEW"
+	// Первоначальный баланс начисления равен 0, статус обработки — NEW
+	err = s.userRepo.CreateOrder(ctx, orderID, userID, "NEW")
+	if err != nil {
+		log.Error("Не удалось сохранить новый заказ в базу данных", err)
+		return fmt.Errorf("failed to save new order: %w", err)
+	}
+	log.Info("Новый заказ успешно сохранен в БД и принят в обработку")
+
+	// 3. Асинхронный запуск планировщика расчета баллов лояльности
+	// Мы запускаем фоновую горутину (или пишем задачу в канал воркера),
+	// чтобы хендлер мгновенно вернул статус 202, не дожидаясь ответа от внешней системы.
+	go s.fetchOrderAccrualAsync(orderID)
+
+	return nil
+}
+
+// fetchOrderAccrualAsync — фоновый воркер, который будет опрашивать
+// внешнюю систему расчета баллов лояльности ("черный ящик" из ТЗ)
+func (s *LoyaltyService) fetchOrderAccrualAsync(orderID string) {
+	// Здесь будет реализована логика фонового воркера (Worker Pool):
+	// 1. HTTP-запрос к внешнему сервису рассчета баллов: GET /api/orders/{order_id}
+	// 2. Обработка статусов ответа внешнего сервиса (PROCESSING, INVALID, PROCESSED)
+	// 3. Обновление статуса заказа и баланса пользователя в БД внутри ACID транзакции
+}
+
+// ValidateToken проверяет подпись JWT токена и возвращает userID в случае успеха.
+// Если токен протух, изменен или невалиден, возвращает ошибку.
+func (s *LoyaltyService) ValidateToken(ctx context.Context, tokenString string) (string, error) {
+	s.logger.Debug("Валидация JWT токена на уровне сервиса")
+
+	claims := &Claims{}
+
+	// Парсим и проверяем подпись с использованием s.jwtSecret
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return s.jwtSecret, nil
+	})
+
+	if err != nil {
+		s.logger.Debug("Не удалось распарсить или верифицировать JWT токен")
+		return "", fmt.Errorf("token parsing failed: %w", err)
+	}
+
+	if !token.Valid {
+		s.logger.Debug("Предоставлен невалидный JWT токен")
+		return "", errors.New("token is invalid")
+	}
+
+	if claims.UserID == "" {
+		s.logger.Debug("В полезной нагрузке токена отсутствует user_id")
+		return "", errors.New("token payload missing user id")
+	}
+
+	s.logger.Debug("Токен успешно верифицирован")
+	return claims.UserID, nil
 }
