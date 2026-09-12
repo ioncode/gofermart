@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -25,12 +24,13 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	var req RegisterRequest
 	// Читаем JSON. Если формат битый -> 400 Bad Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request format", http.StatusBadRequest)
+	if !ReadJSONOptimized(w, r, &req) {
 		return
 	}
 
 	// Базовая валидация на пустые поля -> 400 Bad Request
+	req.Login = strings.TrimSpace(req.Login)
+	req.Password = strings.TrimSpace(req.Password)
 	if req.Login == "" || req.Password == "" {
 		http.Error(w, "Login and password are required", http.StatusBadRequest)
 		return
