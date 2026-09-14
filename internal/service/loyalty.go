@@ -10,6 +10,7 @@ import (
 	"github.com/ioncode/gofermart/internal/domain"
 	"github.com/ioncode/gofermart/internal/repository"
 	"github.com/ioncode/ulog/v3"
+	"github.com/shopspring/decimal"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -257,4 +258,22 @@ func (s *LoyaltyService) GetOrders(ctx context.Context, userID string) ([]domain
 	}
 
 	return orders, nil
+}
+
+// GetBalance возвращает текущий баланс и сумму списаний пользователя в виде чистых типов decimal.Decimal.
+func (s *LoyaltyService) GetBalance(ctx context.Context, userID string) (decimal.Decimal, decimal.Decimal, error) {
+	userLogger := s.logger.With(ulog.String("user_id", userID))
+	userLogger.Debug("Запрос баланса для пользователя")
+
+	current, withdrawn, err := s.userRepo.GetUserBalance(ctx, userID)
+	if err != nil {
+		userLogger.Error("Ошибка запроса баланса пользователя", err)
+		return decimal.Zero, decimal.Zero, fmt.Errorf("loyalty_service: failed to get user balance: %w", err)
+	}
+
+	return current, withdrawn, nil
+}
+
+func (s *LoyaltyService) Test() {
+
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/ioncode/gofermart/internal/domain"
 	"github.com/ioncode/ulog/v3"
+	"github.com/shopspring/decimal"
 )
 
 type LoyaltyService interface {
@@ -13,7 +14,7 @@ type LoyaltyService interface {
 	UploadOrder(ctx context.Context, userID string, orderID string) error
 	ValidateToken(ctx context.Context, tokenString string) (userID string, err error)
 	GetOrders(ctx context.Context, userID string) ([]domain.Order, error)
-	// GetBalance(ctx context.Context, userID string) ([]byte, error)
+	GetBalance(ctx context.Context, userID string) (decimal.Decimal, decimal.Decimal, error)
 	// Withdraw(ctx context.Context, userID string, sum float64, orderID string) error
 	// GetWithdrawals(ctx context.Context, userID string) ([]byte, error)
 }

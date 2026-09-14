@@ -38,4 +38,6 @@ type UserRepository interface {
 	// GetOrdersByUserID возвращает список всех заказов конкретного пользователя,
 	// отсортированных по времени загрузки от самых старых к самым новым.
 	GetOrdersByUserID(ctx context.Context, userID string) ([]domain.Order, error)
+	// GetUserBalance возвращает данные о текущей сумме баллов лояльности, а также сумме использованных за весь период регистрации баллов.
+	GetUserBalance(ctx context.Context, userID string) (current decimal.Decimal, withdrawn decimal.Decimal, err error)
 }

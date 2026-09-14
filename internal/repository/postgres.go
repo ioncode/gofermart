@@ -292,3 +292,28 @@ func (r *PostgresRepository) GetOrdersByUserID(ctx context.Context, userID strin
 
 	return orders, nil
 }
+
+// GetUserBalance возвращает текущий доступный баланс пользователя и общую сумму его списаний за всё время.
+//
+// Метод считывает данные высокой точности NUMERIC напрямую в структуры decimal.Decimal,
+// полностью исключая погрешности округления копеек на уровне бизнес-логики.
+// Если пользователь не найден в системе, возвращает ошибку ErrUserNotFound.
+func (r *PostgresRepository) GetUserBalance(ctx context.Context, userID string) (decimal.Decimal, decimal.Decimal, error) {
+	// Запрос выбирает поля баланса и списаний для конкретного UUID пользователя
+	query := `SELECT balance, withdrawn FROM users WHERE id = $1`
+
+	var current decimal.Decimal
+	var withdrawn decimal.Decimal
+
+	// Выполняем точечное чтение одной строки
+	err := r.db.QueryRow(ctx, query, userID).Scan(&current, &withdrawn)
+	if err != nil {
+		// Если СУБД вернула отсутствие строк, мапим ошибку на понятную для сервиса
+		if errors.Is(err, pgx.ErrNoRows) {
+			return decimal.Zero, decimal.Zero, ErrUserNotFound
+		}
+		return decimal.Zero, decimal.Zero, fmt.Errorf("postgres: failed to scan user balance: %w", err)
+	}
+
+	return current, withdrawn, nil
+}
