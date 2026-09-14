@@ -46,8 +46,6 @@ type Claims struct {
 }
 
 func (s *LoyaltyService) Register(ctx context.Context, login string, password string) (string, error) {
-	// СОЗДАНИЕ САБЛОГГЕРА ДЛЯ БИЗНЕС-ЛОГИКИ
-	// Метод .With() привязывает login к контексту выполнения этой функции
 	log := s.logger.With(ulog.String("login", login))
 	log.Debug("Попытка регистрации нового пользователя")
 	exists, err := s.userRepo.CheckUserExists(ctx, login)
@@ -210,15 +208,6 @@ func (s *LoyaltyService) UploadOrder(ctx context.Context, userID string, orderID
 	}
 
 	return nil
-}
-
-// fetchOrderAccrualAsync — фоновый воркер, который будет опрашивать
-// внешнюю систему расчета баллов лояльности ("черный ящик" из ТЗ)
-func (s *LoyaltyService) fetchOrderAccrualAsync(orderID string) {
-	// Здесь будет реализована логика фонового воркера (Worker Pool):
-	// 1. HTTP-запрос к внешнему сервису рассчета баллов: GET /api/orders/{order_id}
-	// 2. Обработка статусов ответа внешнего сервиса (PROCESSING, INVALID, PROCESSED)
-	// 3. Обновление статуса заказа и баланса пользователя в БД внутри ACID транзакции
 }
 
 // ValidateToken проверяет подпись JWT токена и возвращает userID в случае успеха.
