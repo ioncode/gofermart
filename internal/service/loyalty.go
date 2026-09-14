@@ -202,9 +202,9 @@ func (s *LoyaltyService) UploadOrder(ctx context.Context, userID string, orderID
 	// Заказ подхватится плановым тикером воркера из БД чуть позже.
 	select {
 	case s.orderChan <- newOrder:
-		s.logger.Debug(fmt.Sprintf("Заказ %s успешно передан в канал для мгновенной обработки", orderID))
+		log.Info("Заказ успешно передан в канал для мгновенной обработки")
 	default:
-		s.logger.Debug(fmt.Sprintf("Буфер канала полон. Заказ %s оставлен в БД для плановой обработки тикером", orderID))
+		log.Info("Буфер канала полон. Заказ оставлен в БД для плановой обработки тикером")
 	}
 
 	return nil
