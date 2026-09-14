@@ -92,12 +92,21 @@ func (h *UserHandler) GetOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Устанавливаем заголовок контента перед записью тела ответа
+	// 1. Сначала маршалим данные в слайс байт в оперативной памяти Go
+	bodyBytes, err := json.Marshal(orders)
+	if err != nil {
+		// Если произошел сбой, заголовки еще НЕ отправлены!
+		// Мы можем честно вернуть статус 500
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError) // 500
+		_, _ = w.Write([]byte("Internal Server Error: failed to encode response"))
+
+		h.logger.Error("Ошибка маршалинга списка заказов в JSON", err)
+		return
+	}
+
+	// 2. Ошибок нет. Теперь со спокойной душой отправляем 200 OK и тело
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK) // 200
-
-	// Сериализуем слайс заказов в JSON напрямую в поток ответа
-	if err := json.NewEncoder(w).Encode(orders); err != nil {
-		h.logger.Error("Ошибка маршалинга списка заказов в JSON", err)
-	}
+	_, _ = w.Write(bodyBytes)
 }
