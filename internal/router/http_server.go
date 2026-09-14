@@ -37,8 +37,8 @@ func NewServer(addr string, userHandler *handler.UserHandler, logger ulog.Logger
 		r.Group(func(r chi.Router) {
 			r.Use(userHandler.AuthMiddleware)
 
-			r.Post("/orders", userHandler.UploadOrder)
-			// r.Get("/orders", userHandler.GetOrders)
+			r.With(middleware.AllowContentType("text/plain")).Post("/orders", userHandler.UploadOrder)
+			r.Get("/orders", userHandler.GetOrders)
 
 			// r.Get("/balance", userHandler.GetBalance)
 			// r.Post("/balance/withdraw", userHandler.Withdraw)

@@ -16,9 +16,12 @@ import (
 	"github.com/ioncode/ulog/v3"
 	"github.com/ioncode/ulog/v3/adapters/uzerolog"
 	"github.com/rs/zerolog"
+	"github.com/shopspring/decimal"
 )
 
 func main() {
+	// Переключаем маршалинг decimal в числовой формат для JSON (без кавычек)
+	decimal.MarshalJSONWithoutQuotes = true
 	// 1. Настройка логгера ulog + zerolog
 
 	// локально используем консольный вывод красивых логов
@@ -69,7 +72,7 @@ func main() {
 	// Инициализируем фоновый воркер
 	accrualWorker := worker.NewAccrualWorker(repo, cfg.AccrualSystemAddress, logger)
 	loyaltySvc := service.NewLoyaltyService(repo, cfg.JWTSecret, cfg.TokenTTL, logger, accrualWorker.OrderChan)
-	userHandler := handler.NewUserHandler(loyaltySvc, false)
+	userHandler := handler.NewUserHandler(loyaltySvc, false, logger)
 	server := router.NewServer(cfg.RunAddress, userHandler, logger)
 
 	// 5. Старт HTTP-сервера в отдельной горутине, чтобы не блокировать основной поток.

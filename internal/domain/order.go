@@ -79,7 +79,7 @@ type Order struct {
 	Status OrderStatus `json:"status"`
 	// Accrual хранит количество начисленных баллов лояльности за этот заказ.
 	// Поле исключается из JSON-ответа (omitempty), если начислений еще нет.
-	Accrual decimal.Decimal `json:"accrual,omitempty"`
+	Accrual *decimal.Decimal `json:"accrual,omitempty"`
 	// UploadedAt фиксирует точную дату и время загрузки заказа пользователем.
 	UploadedAt time.Time `json:"uploaded_at"`
 }

@@ -6,29 +6,12 @@ import (
 	"net/http"
 	"strings"
 
-	// Путь к алгоритму Луна
-	// Путь к ошибкам репозитория/сервиса
-
+	json "github.com/goccy/go-json"
 	"github.com/ioncode/gofermart/internal/service"
 )
 
 // UploadOrder обрабатывает HTTP-запрос POST /api/user/orders.
-// Хендлер принимает номер заказа в формате text/plain, валидирует по алгоритму Луна
-// и отправляет в монолитный LoyaltyService для асинхронной обработки.
 func (h *UserHandler) UploadOrder(w http.ResponseWriter, r *http.Request) {
-	// 1. Проверяем HTTP метод
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// 2. Проверяем Content-Type (спецификация строго требует text/plain)
-	ct := r.Header.Get("Content-Type")
-	if !strings.HasPrefix(ct, "text/plain") {
-		http.Error(w, "Invalid Content-Type, expected text/plain", http.StatusBadRequest) // 400
-		return
-	}
-
 	// Извлекаем userID, который Middleware записала в контекст запроса
 	userID, ok := r.Context().Value(UserIDContextKey).(string)
 	if !ok || userID == "" {
@@ -62,7 +45,7 @@ func (h *UserHandler) UploadOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 6. Передаем строго типизированные аргументы в монолитный сервис автора
+	// 6. Передаем строго типизированные аргументы в монолитный сервис
 	err = h.service.UploadOrder(r.Context(), userID, orderID)
 	if err != nil {
 		// Маппинг ошибок согласно требованиям ТЗ
@@ -82,4 +65,39 @@ func (h *UserHandler) UploadOrder(w http.ResponseWriter, r *http.Request) {
 
 	// 7. Спецификация: новый номер заказа принят в обработку
 	w.WriteHeader(http.StatusAccepted) // 202
+}
+
+// GetOrders возвращает JSON-список всех заказов авторизованного пользователя.
+// Хендлер привязан к маршруту: GET /api/user/orders
+func (h *UserHandler) GetOrders(w http.ResponseWriter, r *http.Request) {
+
+	// Извлекаем userID, сохраненный Middleware авторизации в контексте запроса
+	userID, ok := r.Context().Value(UserIDContextKey).(string)
+	if !ok || userID == "" {
+		http.Error(w, "Unauthorized user context missing", http.StatusUnauthorized) // 401
+		return
+	}
+
+	// Запрашиваем список заказов из бизнес-логики
+	orders, err := h.service.GetOrders(r.Context(), userID)
+	if err != nil {
+		h.logger.Error("Не удалось получить список заказов пользователя", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError) // 500
+		return
+	}
+
+	// ТЗ: Если у пользователя нет загруженных заказов, возвращаем 204 No Content
+	if len(orders) == 0 {
+		w.WriteHeader(http.StatusNoContent) // 204
+		return
+	}
+
+	// Устанавливаем заголовок контента перед записью тела ответа
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK) // 200
+
+	// Сериализуем слайс заказов в JSON напрямую в поток ответа
+	if err := json.NewEncoder(w).Encode(orders); err != nil {
+		h.logger.Error("Ошибка маршалинга списка заказов в JSON", err)
+	}
 }

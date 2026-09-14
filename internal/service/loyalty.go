@@ -243,3 +243,18 @@ func (s *LoyaltyService) ValidateToken(ctx context.Context, tokenString string) 
 	s.logger.Debug("Токен успешно верифицирован")
 	return claims.UserID, nil
 }
+
+// GetOrders возвращает список всех заказов пользователя, отсортированных от старых к новым.
+// Если заказов в системе нет, возвращает пустой слайс без ошибки.
+func (s *LoyaltyService) GetOrders(ctx context.Context, userID string) ([]domain.Order, error) {
+	userLogger := s.logger.With(ulog.String("user_id", userID))
+	userLogger.Debug("Запрос списка заказов для пользователя")
+
+	orders, err := s.userRepo.GetOrdersByUserID(ctx, userID)
+	if err != nil {
+		userLogger.Error("Ошибка получения списка заказов польователя из репозитория", err)
+		return nil, fmt.Errorf("loyalty_service: failed to fetch user orders: %w", err)
+	}
+
+	return orders, nil
+}

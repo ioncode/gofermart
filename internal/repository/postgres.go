@@ -240,3 +240,55 @@ func (r *PostgresRepository) GetUnprocessedOrders(ctx context.Context) ([]domain
 
 	return orders, nil
 }
+
+// GetOrdersByUserID возвращает список всех заказов конкретного пользователя.
+//
+// Выборка сортируется по времени загрузки от самых старых к самым новым (ASC)
+// согласно требованиям технического задания. Поля типов NUMERIC/DECIMAL автоматически
+// сканируются в высокоточную структуру домена лояльности decimal.Decimal.
+//
+// Если у пользователя нет загруженных заказов, метод возвращает пустой слайс и nil вместо ошибки.
+func (r *PostgresRepository) GetOrdersByUserID(ctx context.Context, userID string) ([]domain.Order, error) {
+	query := `SELECT id, user_id, status, accrual, uploaded_at 
+	          FROM orders 
+	          WHERE user_id = $1 
+	          ORDER BY uploaded_at ASC`
+
+	rows, err := r.db.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: failed to query user orders: %w", err)
+	}
+	defer rows.Close()
+
+	// Инициализируем слайс с базовой емкостью, чтобы снизить количество аллокаций в куче при append
+	orders := make([]domain.Order, 0, 16)
+
+	for rows.Next() {
+		var o domain.Order
+		var dbAccrual decimal.Decimal // Локальная переменная (не указатель)
+		err := rows.Scan(
+			&o.ID,
+			&o.UserID,
+			&o.Status,
+			&dbAccrual, // Сканируем из базы в обычный decimal
+			&o.UploadedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("postgres: failed to scan user order row: %w", err)
+		}
+		// Заполняем поле accrual только если статус PROCESSED
+		if o.Status == domain.StatusProcessed {
+			o.Accrual = &dbAccrual
+		} else {
+			o.Accrual = nil // Для NEW, PROCESSING, INVALID поле гарантированно станет nil
+		}
+		orders = append(orders, o)
+	}
+
+	// Обязательная проверка итератора на наличие скрытых сетевых ошибок СУБД
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: rows error in user orders: %w", err)
+	}
+
+	return orders, nil
+}
