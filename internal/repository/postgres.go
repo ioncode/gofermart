@@ -111,13 +111,14 @@ func (r *PostgresRepository) GetPasswordHash(ctx context.Context, login string) 
 func (r *PostgresRepository) GetOrder(ctx context.Context, orderID string) (domain.Order, error) {
 	query := `SELECT id, user_id, status, accrual, uploaded_at FROM orders WHERE id = $1`
 	var o domain.Order
+	var dbAccrual decimal.Decimal // Локальная переменная (не указатель)
 
 	// Прямой маппинг полей таблицы Postgres на доменную модель Go лояльности
 	err := r.db.QueryRow(ctx, query, orderID).Scan(
 		&o.ID,
 		&o.UserID,
 		&o.Status,
-		&o.Accrual,
+		&dbAccrual,
 		&o.UploadedAt,
 	)
 	if err != nil {
@@ -126,6 +127,9 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, orderID string) (doma
 			return domain.Order{}, ErrOrderNotFound
 		}
 		return domain.Order{}, fmt.Errorf("postgres: get order execution failed: %w", err)
+	}
+	if o.Status == domain.StatusProcessed {
+		o.Accrual = &dbAccrual
 	}
 
 	return o, nil
@@ -200,13 +204,10 @@ func NewPoolWithDecimal(ctx context.Context, databaseURI string) (*pgxpool.Pool,
 }
 
 // GetUnprocessedOrders вычитывает из базы данных список всех заказов, находящихся
-// в промежуточных (нефинальных) статусах NEW и PROCESSING.
-//
-// Метод сортирует выборку по времени загрузки от самых старых к самым новым (ASC),
-// обеспечивая справедливую очередность отправки во внешнюю систему расчета accrual.
-// Поля высокой точности NUMERIC сканируются напрямую в типы домена лояльности.
+// в промежуточных статусах NEW и PROCESSING, исключая неиспользуемые воркером поля.
 func (r *PostgresRepository) GetUnprocessedOrders(ctx context.Context) ([]domain.Order, error) {
-	query := `SELECT id, user_id, status, accrual, uploaded_at 
+	// Убираем accrual из SELECT, оставляем только необходимые воркеру поля
+	query := `SELECT id, user_id, status, uploaded_at 
 	          FROM orders 
 	          WHERE status IN ('NEW', 'PROCESSING')
 	          ORDER BY uploaded_at ASC`
@@ -217,14 +218,14 @@ func (r *PostgresRepository) GetUnprocessedOrders(ctx context.Context) ([]domain
 	}
 	defer rows.Close()
 
-	var orders []domain.Order
+	orders := make([]domain.Order, 0, 16)
 	for rows.Next() {
 		var o domain.Order
+		// Поле o.Accrual не участвует в Scan и по умолчанию останется равным nil
 		err := rows.Scan(
 			&o.ID,
 			&o.UserID,
 			&o.Status,
-			&o.Accrual, // Прямой маппинг NUMERIC в decimal.Decimal
 			&o.UploadedAt,
 		)
 		if err != nil {
@@ -233,7 +234,6 @@ func (r *PostgresRepository) GetUnprocessedOrders(ctx context.Context) ([]domain
 		orders = append(orders, o)
 	}
 
-	// Обязательная проверка на наличие скрытых ошибок итератора строк rows
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("postgres: rows error in unprocessed orders: %w", err)
 	}
