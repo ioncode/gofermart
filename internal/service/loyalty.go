@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/ioncode/gofermart/internal/domain"
 	"github.com/ioncode/gofermart/internal/repository"
 	"github.com/ioncode/ulog/v3"
 	"golang.org/x/crypto/bcrypt"
@@ -24,15 +25,17 @@ type LoyaltyService struct {
 	jwtSecret []byte        // Секретный ключ для подписи токенов
 	tokenTTL  time.Duration // Время жизни токена (например, 24 часа)
 	logger    ulog.Logger
+	orderChan chan<- domain.Order
 }
 
-func NewLoyaltyService(repo repository.UserRepository, secret string, ttl time.Duration, logger ulog.Logger) *LoyaltyService {
+func NewLoyaltyService(repo repository.UserRepository, secret string, ttl time.Duration, logger ulog.Logger, orderChan chan<- domain.Order) *LoyaltyService {
 	logger.Debug("Инициализация сервиса Гофермарт")
 	return &LoyaltyService{
 		userRepo:  repo,
 		jwtSecret: []byte(secret),
 		tokenTTL:  ttl,
-		logger:    logger,
+		logger:    logger.With(ulog.String("component", "loyalty_service")),
+		orderChan: orderChan,
 	}
 }
 
@@ -187,10 +190,24 @@ func (s *LoyaltyService) UploadOrder(ctx context.Context, userID string, orderID
 	}
 	log.Info("Новый заказ успешно сохранен в БД и принят в обработку")
 
-	// 3. Асинхронный запуск планировщика расчета баллов лояльности
-	// Мы запускаем фоновую горутину (или пишем задачу в канал воркера),
-	// чтобы хендлер мгновенно вернул статус 202, не дожидаясь ответа от внешней системы.
-	go s.fetchOrderAccrualAsync(orderID)
+	// 3. Формируем доменную модель для отправки в событийный воркер
+	newOrder := domain.Order{
+		ID:         orderID,
+		UserID:     userID,
+		Status:     domain.StatusNew,
+		UploadedAt: time.Now(),
+	}
+
+	// 4. МГНОВЕННАЯ ОТПРАВКА: Пишем в канал воркера через неблокирующий select.
+	// Если буфер канала переполнен (например, при DDoS или высокой нагрузке),
+	// мы не подвешиваем горутину HTTP-запроса — пользователь мгновенно получит 202 Accepted.
+	// Заказ подхватится плановым тикером воркера из БД чуть позже.
+	select {
+	case s.orderChan <- newOrder:
+		s.logger.Debug(fmt.Sprintf("Заказ %s успешно передан в канал для мгновенной обработки", orderID))
+	default:
+		s.logger.Debug(fmt.Sprintf("Буфер канала полон. Заказ %s оставлен в БД для плановой обработки тикером", orderID))
+	}
 
 	return nil
 }

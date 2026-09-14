@@ -12,9 +12,9 @@ import (
 	"github.com/ioncode/gofermart/internal/repository"
 	"github.com/ioncode/gofermart/internal/router"
 	"github.com/ioncode/gofermart/internal/service"
+	"github.com/ioncode/gofermart/internal/worker"
 	"github.com/ioncode/ulog/v3"
 	"github.com/ioncode/ulog/v3/adapters/uzerolog"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 )
 
@@ -52,7 +52,7 @@ func main() {
 	// 3. Инициализация пула соединений с PostgreSQL.
 	// Контекст отменяется сразу после успешного (или неуспешного) подключения.
 	poolCtx, poolCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	pool, err := pgxpool.New(poolCtx, cfg.DatabaseURI)
+	pool, err := repository.NewPoolWithDecimal(poolCtx, cfg.DatabaseURI)
 	poolCancel()
 	if err != nil {
 		logger.Error("Не удалось подключиться к базе данных", err)
@@ -66,7 +66,9 @@ func main() {
 
 	// 4. Сборка слоев приложения согласно Чистой Архитектуре (Dependency Injection).
 	repo := repository.NewPostgresRepository(pool)
-	loyaltySvc := service.NewLoyaltyService(repo, cfg.JWTSecret, cfg.TokenTTL, logger)
+	// Инициализируем фоновый воркер
+	accrualWorker := worker.NewAccrualWorker(repo, cfg.AccrualSystemAddress, logger)
+	loyaltySvc := service.NewLoyaltyService(repo, cfg.JWTSecret, cfg.TokenTTL, logger, accrualWorker.OrderChan)
 	userHandler := handler.NewUserHandler(loyaltySvc, false)
 	server := router.NewServer(cfg.RunAddress, userHandler, logger)
 
@@ -78,11 +80,18 @@ func main() {
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// 7. Запускаем воркер в фоне. Плановый тикер подстраховки настраиваем на 5 секунд.
+	go accrualWorker.Start(rootCtx, 5*time.Second)
+
 	// Блокируемся и ждем системного сигнала.
 	<-rootCtx.Done()
 	logger.Info("Получен сигнал завершения работы ОС. Начинаем плавную остановку сервера...")
 
-	// 7. Ограничиваем время ожидания завершения текущих HTTP-запросов до 5 секунд.
+	// 8. Закрываем канал для записи новых заказов (хендлеры перестанут слать новые события)
+	close(accrualWorker.OrderChan)
+	logger.Debug("Канал воркера успешно закрыт для записи")
+
+	// 9. Ограничиваем время ожидания завершения текущих HTTP-запросов до 5 секунд.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

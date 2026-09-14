@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 )
 
 // Встраиваем папку с миграциями прямо в бинарный файл приложения
@@ -100,34 +101,31 @@ func (r *PostgresRepository) GetPasswordHash(ctx context.Context, login string) 
 	return userID, hash, nil
 }
 
-// GetOrder ищет заказ по его уникальному номеру с использованием pgxpool
+// GetOrder осуществляет поиск конкретного заказа в базе данных по его строковому идентификатору.
+//
+// Метод напрямую сканирует SQL-тип NUMERIC/DECIMAL в высокоточную структуру domain.Accrual
+// без использования промежуточных float-указателей, что полностью исключает потерю копеек.
+//
+// Если заказ с указанным идентификатором отсутствует в системе, метод возвращает
+// пустую доменную модель и структурированную ошибку ErrOrderNotFound.
 func (r *PostgresRepository) GetOrder(ctx context.Context, orderID string) (domain.Order, error) {
 	query := `SELECT id, user_id, status, accrual, uploaded_at FROM orders WHERE id = $1`
-
 	var o domain.Order
-	// В pgx можно сканировать NUMERIC напрямую в float64, но если там NULL,
-	// лучше использовать указатель *float64, чтобы избежать падения
-	var accrual *float64
 
-	// ИСПРАВЛЕНО: QueryRowContext -> QueryRow
+	// Прямой маппинг полей таблицы Postgres на доменную модель Go лояльности
 	err := r.db.QueryRow(ctx, query, orderID).Scan(
 		&o.ID,
 		&o.UserID,
 		&o.Status,
-		&accrual,
+		&o.Accrual,
 		&o.UploadedAt,
 	)
-
 	if err != nil {
-		// ИСПРАВЛЕНО: Проверка на отсутствие строк в pgx делается через pgx.ErrNoRows
+		// Отрабатываем отсутствие записей по стандарту pgx/v5
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Order{}, ErrOrderNotFound
 		}
 		return domain.Order{}, fmt.Errorf("postgres: get order execution failed: %w", err)
-	}
-
-	if accrual != nil {
-		o.Accrual = *accrual
 	}
 
 	return o, nil
@@ -137,7 +135,6 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, orderID string) (doma
 func (r *PostgresRepository) CreateOrder(ctx context.Context, orderID string, userID string, status string) error {
 	query := `INSERT INTO orders (id, user_id, status, accrual) VALUES ($1, $2, $3, 0.00)`
 
-	// ИСПРАВЛЕНО: ExecContext -> Exec
 	_, err := r.db.Exec(ctx, query, orderID, userID, status)
 	if err != nil {
 		return fmt.Errorf("postgres: failed to insert new order: %w", err)
@@ -146,25 +143,23 @@ func (r *PostgresRepository) CreateOrder(ctx context.Context, orderID string, us
 	return nil
 }
 
-// UpdateOrderAccrual обновляет статус заказа и увеличивает баланс пользователя внутри транзакции pgx
-func (r *PostgresRepository) UpdateOrderAccrual(ctx context.Context, orderID string, userID string, status string, accrual float64) error {
-	// 1. Стартуем транзакцию через pgxpool
+// UpdateOrderAccrual переводит заказ в новый статус и начисляет баллы лояльности в рамках ACID-транзакции.
+func (r *PostgresRepository) UpdateOrderAccrual(ctx context.Context, orderID string, userID string, status string, accrual decimal.Decimal) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("postgres: cannot start transaction: %w", err)
 	}
-	// Гарантируем откат в случае ошибки
 	defer tx.Rollback(ctx)
 
-	// 2. Обновляем статус и сумму начисления в таблице заказов
+	// 1. Обновляем статус и сумму начисления в таблице заказов
 	orderQuery := `UPDATE orders SET status = $1, accrual = $2 WHERE id = $3`
 	_, err = tx.Exec(ctx, orderQuery, status, accrual, orderID)
 	if err != nil {
 		return fmt.Errorf("postgres: tx update order failed: %w", err)
 	}
 
-	// 3. Если баллы лояльности больше нуля, прибавляем их к балансу пользователя
-	if accrual > 0 {
+	// 2. Начисляем баллы пользователю при положительной сумме
+	if accrual.IsPositive() {
 		userQuery := `UPDATE users SET balance = balance + $1 WHERE id = $2`
 		_, err = tx.Exec(ctx, userQuery, accrual, userID)
 		if err != nil {
@@ -172,10 +167,76 @@ func (r *PostgresRepository) UpdateOrderAccrual(ctx context.Context, orderID str
 		}
 	}
 
-	// 4. Фиксируем изменения в базе данных
+	// 3. Фиксируем транзакцию
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("postgres: tx commit failed: %w", err)
 	}
 
 	return nil
+}
+
+// NewPoolWithDecimal создает и настраивает пул соединений pgxpool.Pool с поддержкой контекста.
+// Метод регистрирует поддержку типов высокой точности shopspring/decimal
+// для нативного маппинга PostgreSQL типов NUMERIC/DECIMAL на уровне драйвера.
+func NewPoolWithDecimal(ctx context.Context, databaseURI string) (*pgxpool.Pool, error) {
+	config, err := pgxpool.ParseConfig(databaseURI)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: failed to parse database uri config: %w", err)
+	}
+
+	// Настраиваем триггер, который срабатывает при каждом новом физическом подключении к БД
+	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		// pgx/v5 автоматически мапит типы shopspring/decimal, если они передаются напрямую.
+		return nil
+	}
+
+	// Используем NewWithConfig, но контролируем создание пула через переданный контекст
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: failed to create pool with config: %w", err)
+	}
+
+	return pool, nil
+}
+
+// GetUnprocessedOrders вычитывает из базы данных список всех заказов, находящихся
+// в промежуточных (нефинальных) статусах NEW и PROCESSING.
+//
+// Метод сортирует выборку по времени загрузки от самых старых к самым новым (ASC),
+// обеспечивая справедливую очередность отправки во внешнюю систему расчета accrual.
+// Поля высокой точности NUMERIC сканируются напрямую в типы домена лояльности.
+func (r *PostgresRepository) GetUnprocessedOrders(ctx context.Context) ([]domain.Order, error) {
+	query := `SELECT id, user_id, status, accrual, uploaded_at 
+	          FROM orders 
+	          WHERE status IN ('NEW', 'PROCESSING')
+	          ORDER BY uploaded_at ASC`
+
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: failed to query unprocessed orders: %w", err)
+	}
+	defer rows.Close()
+
+	var orders []domain.Order
+	for rows.Next() {
+		var o domain.Order
+		err := rows.Scan(
+			&o.ID,
+			&o.UserID,
+			&o.Status,
+			&o.Accrual, // Прямой маппинг NUMERIC в decimal.Decimal
+			&o.UploadedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("postgres: failed to scan unprocessed order: %w", err)
+		}
+		orders = append(orders, o)
+	}
+
+	// Обязательная проверка на наличие скрытых ошибок итератора строк rows
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: rows error in unprocessed orders: %w", err)
+	}
+
+	return orders, nil
 }

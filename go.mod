@@ -14,6 +14,7 @@ require (
 	github.com/ioncode/ulog/v3 v3.0.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/rs/zerolog v1.35.1
+	github.com/shopspring/decimal v1.4.0
 	golang.org/x/crypto v0.56.0
 )
 

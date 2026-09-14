@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/ioncode/gofermart/internal/domain"
+	"github.com/shopspring/decimal"
 )
 
 // Доменные ошибки репозитория
@@ -23,4 +24,10 @@ type UserRepository interface {
 	GetOrder(ctx context.Context, orderID string) (domain.Order, error)
 	// CreateOrder создает новую запись о заказе со статусом PROCESSING или NEW
 	CreateOrder(ctx context.Context, orderID string, userID string, status string) error
+	// GetUnprocessedOrders вычитывает из базы список заказов в промежуточных статусах (NEW, PROCESSING)
+	// для их последующей передачи во внешнюю систему расчета accrual.
+	GetUnprocessedOrders(ctx context.Context) ([]domain.Order, error)
+	// UpdateOrderAccrual переводит заказ в новый статус и начисляет баллы лояльности.
+	// Метод должен выполняться внутри ACID-транзакции: обновление таблицы заказов и баланса пользователя.
+	UpdateOrderAccrual(ctx context.Context, orderID string, userID string, status string, accrual decimal.Decimal) error
 }
