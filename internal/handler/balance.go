@@ -23,7 +23,7 @@ func (h *UserHandler) GetBalance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Извлекаем userID из контекста авторизации (Middleware)
-	userID, ok := r.Context().Value(UserIDContextKey).(string)
+	userID, ok := getUserIDFromContext(r.Context())
 	if !ok || userID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized) // 401
 		return

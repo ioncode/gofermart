@@ -13,7 +13,7 @@ import (
 // UploadOrder обрабатывает HTTP-запрос POST /api/user/orders.
 func (h *UserHandler) UploadOrder(w http.ResponseWriter, r *http.Request) {
 	// Извлекаем userID, который Middleware записала в контекст запроса
-	userID, ok := r.Context().Value(UserIDContextKey).(string)
+	userID, ok := getUserIDFromContext(r.Context())
 	if !ok || userID == "" {
 		http.Error(w, "User unauthorized", http.StatusUnauthorized) // 401
 		return
@@ -72,7 +72,7 @@ func (h *UserHandler) UploadOrder(w http.ResponseWriter, r *http.Request) {
 func (h *UserHandler) GetOrders(w http.ResponseWriter, r *http.Request) {
 
 	// Извлекаем userID, сохраненный Middleware авторизации в контексте запроса
-	userID, ok := r.Context().Value(UserIDContextKey).(string)
+	userID, ok := getUserIDFromContext(r.Context())
 	if !ok || userID == "" {
 		http.Error(w, "Unauthorized user context missing", http.StatusUnauthorized) // 401
 		return

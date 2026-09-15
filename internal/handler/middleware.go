@@ -9,7 +9,7 @@ import (
 
 type contextKey string
 
-const UserIDContextKey contextKey = "user_id"
+const userIDContextKey contextKey = "user_id"
 
 // AuthMiddleware перехватывает запросы к защищенным ручкам,
 // достает куку и просит сервис валидировать токен.
@@ -43,7 +43,13 @@ func (h *UserHandler) AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		// 3. Обогащаем контекст и передаем управление дальше по цепочке
-		ctx := context.WithValue(r.Context(), UserIDContextKey, userID)
+		ctx := context.WithValue(r.Context(), userIDContextKey, userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// getUserIDFromContext возвращает идентификатор пользователя из контекста
+func getUserIDFromContext(ctx context.Context) (string, bool) {
+	userID, ok := ctx.Value(userIDContextKey).(string)
+	return userID, ok
 }
