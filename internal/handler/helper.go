@@ -21,40 +21,39 @@ var bodyBufferPool = sync.Pool{
 }
 
 func ReadJSONOptimized(w http.ResponseWriter, r *http.Request, dst any) bool {
-	// 1. Быстрая проверка Content-Type без вызова тяжелых функций strings
 	ct := r.Header.Get("Content-Type")
 	if len(ct) < 16 || ct[:16] != "application/json" {
 		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 		return false
 	}
 
-	// 2. Берем готовый буфер из пула (уменьшает аллокации до 0)
 	bufPtr := bodyBufferPool.Get().(*[]byte)
 	buf := *bufPtr
-
-	// Гарантируем возврат буфера в пул по завершении работы функции
 	defer bodyBufferPool.Put(bufPtr)
 	defer r.Body.Close()
 
-	// 3. Вычитываем данные напрямую в пуленный буфер
-	// io.ReadFull читает ровно столько, сколько вмещает буфер, либо пока поток не кончится (io.EOF)
 	n, err := io.ReadFull(r.Body, buf)
 
-	// Если err == io.ErrUnexpectedEOF, значит поток закрылся до заполнения 4КБ (это штатное поведение для мелких JSON)
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
-		// Если ошибки io.EOF нет, а err == nil — значит данных пришло больше, чем 4КБ (наш лимит)
-		if err == nil {
-			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+		if errors.Is(err, io.EOF) {
+			http.Error(w, "Request body is empty", http.StatusBadRequest)
 			return false
 		}
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return false
 	}
 
-	// n — это реальное количество прочитанных байт. Отсекаем слайс до этого размера.
+	if err == nil {
+		oneByte := make([]byte, 1)
+		_, extraErr := r.Body.Read(oneByte)
+		if extraErr == nil || !errors.Is(extraErr, io.EOF) {
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+			return false
+		}
+	}
+
 	payload := buf[:n]
 
-	// 4. Парсим JSON с помощью сверхбыстрого goccy
 	if err := json.Unmarshal(payload, dst); err != nil {
 		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
 		return false
