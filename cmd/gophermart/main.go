@@ -78,7 +78,6 @@ func main() {
 		userRepo,
 		orderRepo,
 		balanceRepo,
-		accrualRepo,
 		cfg.JWTSecret,
 		cfg.TokenTTL,
 		logger,

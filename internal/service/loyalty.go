@@ -22,21 +22,19 @@ var (
 )
 
 type LoyaltyService struct {
-	userRepo         repository.UserRepository
-	orderRepo        repository.OrderRepository
-	balanceRepo      repository.BalanceRepository
-	orderAccrualRepo repository.OrderAccrualRepository
-	jwtSecret        []byte        // Секретный ключ для подписи токенов
-	tokenTTL         time.Duration // Время жизни токена (например, 24 часа)
-	logger           ulog.Logger
-	orderChan        chan<- domain.Order
+	userRepo    repository.UserRepository
+	orderRepo   repository.OrderRepository
+	balanceRepo repository.BalanceRepository
+	jwtSecret   []byte        // Секретный ключ для подписи токенов
+	tokenTTL    time.Duration // Время жизни токена (например, 24 часа)
+	logger      ulog.Logger
+	orderChan   chan<- domain.Order
 }
 
 func NewLoyaltyService(
 	userRepo repository.UserRepository,
 	orderRepo repository.OrderRepository,
 	balanceRepo repository.BalanceRepository,
-	orderAccrualRepo repository.OrderAccrualRepository,
 	secret string,
 	ttl time.Duration,
 	logger ulog.Logger,
@@ -44,14 +42,13 @@ func NewLoyaltyService(
 ) *LoyaltyService {
 	logger.Debug("Инициализация сервиса Гофермарт")
 	return &LoyaltyService{
-		userRepo:         userRepo,
-		orderRepo:        orderRepo,
-		balanceRepo:      balanceRepo,
-		orderAccrualRepo: orderAccrualRepo,
-		jwtSecret:        []byte(secret),
-		tokenTTL:         ttl,
-		logger:           logger.With(ulog.String("component", "loyalty_service")),
-		orderChan:        orderChan,
+		userRepo:    userRepo,
+		orderRepo:   orderRepo,
+		balanceRepo: balanceRepo,
+		jwtSecret:   []byte(secret),
+		tokenTTL:    ttl,
+		logger:      logger.With(ulog.String("component", "loyalty_service")),
+		orderChan:   orderChan,
 	}
 }
 

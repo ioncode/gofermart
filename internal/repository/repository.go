@@ -42,7 +42,7 @@ type BalanceRepository interface {
 	GetUserBalance(ctx context.Context, userID string) (decimal.Decimal, decimal.Decimal, error)
 }
 
-// OrderAccrualRepository фасадный репозиторийБ инкапсулирующий транзакционную атомарную операцию
+// OrderAccrualRepository фасадный репозиторий, инкапсулирующий транзакционную атомарную операцию
 type OrderAccrualRepository interface {
 	// UpdateOrderAndBalance переводит заказ в новый статус и начисляет баллы лояльности.
 	// Метод должен выполняться внутри ACID-транзакции: обновление таблицы заказов и баланса пользователя.
