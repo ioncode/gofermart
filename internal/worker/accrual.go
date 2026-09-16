@@ -32,10 +32,11 @@ type AccrualResponse struct {
 // AccrualWorker представляет собой фоновый процессор, который асинхронно
 // опрашивает внешнюю систему начислений и обновляет балансы пользователей.
 type AccrualWorker struct {
-	repo       repository.UserRepository
-	accrualURL string
-	client     *http.Client
-	logger     ulog.Logger
+	orderRepo   repository.OrderRepository
+	accrualRepo repository.OrderAccrualRepository
+	accrualURL  string
+	client      *http.Client
+	logger      ulog.Logger
 	// OrderChan служит для мгновенного получения новых заказов из слоя бизнес-логики.
 	OrderChan chan domain.Order
 	// processing используется для предотвращения одновременной обработки одного заказа тикером и каналом.
@@ -44,15 +45,21 @@ type AccrualWorker struct {
 
 // NewAccrualWorker инициализирует и возвращает новый экземпляр AccrualWorker.
 // Настраивает оптимизированный HTTP-транспорт для минимизации переоткрытия TCP-соединений.
-func NewAccrualWorker(repo repository.UserRepository, accrualURL string, logger ulog.Logger) *AccrualWorker {
+func NewAccrualWorker(
+	orderRepo repository.OrderRepository,
+	accrualRepo repository.OrderAccrualRepository,
+	accrualURL string,
+	logger ulog.Logger,
+) *AccrualWorker {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConns = 100
 	transport.MaxIdleConnsPerHost = 100
 	transport.IdleConnTimeout = 90 * time.Second
 
 	return &AccrualWorker{
-		repo:       repo,
-		accrualURL: accrualURL,
+		orderRepo:   orderRepo,
+		accrualRepo: accrualRepo,
+		accrualURL:  accrualURL,
 		client: &http.Client{
 			Timeout:   5 * time.Second,
 			Transport: transport,
@@ -119,7 +126,7 @@ func (w *AccrualWorker) processSingleOrder(ctx context.Context, order domain.Ord
 // processUnprocessedOrders вычитывает из базы данных список заказов со статусами NEW и PROCESSING
 // и последовательно отправляет их на проверку. Паника на одном заказе изолируется и не прерывает цикл.
 func (w *AccrualWorker) processUnprocessedOrders(ctx context.Context) {
-	orders, err := w.repo.GetUnprocessedOrders(ctx)
+	orders, err := w.orderRepo.GetUnprocessedOrders(ctx)
 	if err != nil {
 		w.logger.Error("Не удалось получить необработанные заказы из БД", err)
 		return
@@ -229,7 +236,7 @@ func (w *AccrualWorker) checkOrderAccrual(ctx context.Context, order domain.Orde
 		}
 
 		// Переводим заказ в финальный статус и начисляем баллы в одной ACID транзакции
-		err = w.repo.UpdateOrderAccrual(ctx, order.ID, order.UserID, string(accResp.Status), val)
+		err = w.accrualRepo.UpdateOrderAndBalance(ctx, order.ID, order.UserID, string(accResp.Status), val)
 		if err != nil {
 			return 0, fmt.Errorf("failed to update final order state in db: %w", err)
 		}
@@ -239,7 +246,7 @@ func (w *AccrualWorker) checkOrderAccrual(ctx context.Context, order domain.Orde
 
 	// Логика фиксации промежуточного статуса (PROCESSING) для прозрачности данных
 	if accResp.Status == domain.AccrualProcessing && order.Status == domain.StatusNew {
-		_ = w.repo.UpdateOrderAccrual(ctx, order.ID, order.UserID, string(domain.StatusProcessing), decimal.NewFromInt(0))
+		_ = w.accrualRepo.UpdateOrderAndBalance(ctx, order.ID, order.UserID, string(domain.StatusProcessing), decimal.NewFromInt(0))
 		orderLogger.Debug("Заказ переведен в промежуточный статус PROCESSING")
 	}
 

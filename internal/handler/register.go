@@ -49,7 +49,8 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 		Name:     "auth_token",
 		Value:    token,
 		Path:     "/",
-		Expires:  time.Now().Add(24 * time.Hour),
+		Expires:  time.Now().Add(h.service.TokenTTL()),
+		MaxAge:   int(h.service.TokenTTL().Seconds()),
 		HttpOnly: true,  // Защита от XSS
 		Secure:   false, // Только для HTTPS
 		SameSite: http.SameSiteLaxMode,

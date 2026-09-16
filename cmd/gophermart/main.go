@@ -9,7 +9,7 @@ import (
 
 	"github.com/ioncode/gofermart/internal/config"
 	"github.com/ioncode/gofermart/internal/handler"
-	"github.com/ioncode/gofermart/internal/repository"
+	"github.com/ioncode/gofermart/internal/repository/postgres"
 	"github.com/ioncode/gofermart/internal/router"
 	"github.com/ioncode/gofermart/internal/service"
 	"github.com/ioncode/gofermart/internal/worker"
@@ -45,7 +45,7 @@ func main() {
 
 	// 2. Выполнение миграций базы данных до инициализации основного пула соединений.
 	// Если таблицы не созданы или СУБД недоступна, приложение упадет здесь.
-	if err := repository.RunMigrations(cfg.DatabaseURI); err != nil {
+	if err := postgres.RunMigrations(cfg.DatabaseURI); err != nil {
 		logger.Error("Критическая ошибка применения миграций", err)
 		os.Exit(1)
 	} else {
@@ -55,7 +55,7 @@ func main() {
 	// 3. Инициализация пула соединений с PostgreSQL.
 	// Контекст отменяется сразу после успешного (или неуспешного) подключения.
 	poolCtx, poolCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	pool, err := repository.NewPoolWithDecimal(poolCtx, cfg.DatabaseURI)
+	pool, err := postgres.NewPoolWithDecimal(poolCtx, cfg.DatabaseURI)
 	poolCancel()
 	if err != nil {
 		logger.Error("Не удалось подключиться к базе данных", err)
@@ -68,10 +68,22 @@ func main() {
 	defer pool.Close()
 
 	// 4. Сборка слоев приложения согласно Чистой Архитектуре (Dependency Injection).
-	repo := repository.NewPostgresRepository(pool)
+	userRepo := postgres.NewUserRepository(pool)
+	orderRepo := postgres.NewOrderRepository(pool)
+	balanceRepo := postgres.NewBalanceRepository(pool)
+	accrualRepo := postgres.NewOrderAccrualRepository(pool)
 	// Инициализируем фоновый воркер
-	accrualWorker := worker.NewAccrualWorker(repo, cfg.AccrualSystemAddress, logger)
-	loyaltySvc := service.NewLoyaltyService(repo, cfg.JWTSecret, cfg.TokenTTL, logger, accrualWorker.OrderChan)
+	accrualWorker := worker.NewAccrualWorker(orderRepo, accrualRepo, cfg.AccrualSystemAddress, logger)
+	loyaltySvc := service.NewLoyaltyService(
+		userRepo,
+		orderRepo,
+		balanceRepo,
+		accrualRepo,
+		cfg.JWTSecret,
+		cfg.TokenTTL,
+		logger,
+		accrualWorker.OrderChan,
+	)
 	userHandler := handler.NewUserHandler(loyaltySvc, false, logger)
 	server := router.NewServer(cfg.RunAddress, userHandler, logger)
 

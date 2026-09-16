@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"time"
 
 	"github.com/ioncode/gofermart/internal/domain"
 	"github.com/ioncode/ulog/v3"
@@ -10,6 +11,7 @@ import (
 
 type LoyaltyService interface {
 	Register(ctx context.Context, login string, password string) (token string, err error)
+	TokenTTL() time.Duration
 	Authenticate(ctx context.Context, login string, password string) (token string, err error)
 	UploadOrder(ctx context.Context, userID string, orderID string) error
 	ValidateToken(ctx context.Context, tokenString string) (userID string, err error)

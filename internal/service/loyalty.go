@@ -22,21 +22,36 @@ var (
 )
 
 type LoyaltyService struct {
-	userRepo  repository.UserRepository
-	jwtSecret []byte        // Секретный ключ для подписи токенов
-	tokenTTL  time.Duration // Время жизни токена (например, 24 часа)
-	logger    ulog.Logger
-	orderChan chan<- domain.Order
+	userRepo         repository.UserRepository
+	orderRepo        repository.OrderRepository
+	balanceRepo      repository.BalanceRepository
+	orderAccrualRepo repository.OrderAccrualRepository
+	jwtSecret        []byte        // Секретный ключ для подписи токенов
+	tokenTTL         time.Duration // Время жизни токена (например, 24 часа)
+	logger           ulog.Logger
+	orderChan        chan<- domain.Order
 }
 
-func NewLoyaltyService(repo repository.UserRepository, secret string, ttl time.Duration, logger ulog.Logger, orderChan chan<- domain.Order) *LoyaltyService {
+func NewLoyaltyService(
+	userRepo repository.UserRepository,
+	orderRepo repository.OrderRepository,
+	balanceRepo repository.BalanceRepository,
+	orderAccrualRepo repository.OrderAccrualRepository,
+	secret string,
+	ttl time.Duration,
+	logger ulog.Logger,
+	orderChan chan<- domain.Order,
+) *LoyaltyService {
 	logger.Debug("Инициализация сервиса Гофермарт")
 	return &LoyaltyService{
-		userRepo:  repo,
-		jwtSecret: []byte(secret),
-		tokenTTL:  ttl,
-		logger:    logger.With(ulog.String("component", "loyalty_service")),
-		orderChan: orderChan,
+		userRepo:         userRepo,
+		orderRepo:        orderRepo,
+		balanceRepo:      balanceRepo,
+		orderAccrualRepo: orderAccrualRepo,
+		jwtSecret:        []byte(secret),
+		tokenTTL:         ttl,
+		logger:           logger.With(ulog.String("component", "loyalty_service")),
+		orderChan:        orderChan,
 	}
 }
 
@@ -161,7 +176,7 @@ func (s *LoyaltyService) UploadOrder(ctx context.Context, userID string, orderID
 	log.Debug("Попытка загрузки нового номера заказа")
 
 	// 1. Проверяем существование заказа в базе данных через репозиторий
-	existingOrder, err := s.userRepo.GetOrder(ctx, orderID)
+	existingOrder, err := s.orderRepo.GetOrder(ctx, orderID)
 	if err != nil {
 		// Если это не ошибка отсутствия записи, значит произошел системный сбой БД
 		if !errors.Is(err, repository.ErrOrderNotFound) {
@@ -182,7 +197,7 @@ func (s *LoyaltyService) UploadOrder(ctx context.Context, userID string, orderID
 
 	// 2. Сохраняем новый заказ в PostgreSQL со статусом "NEW"
 	// Первоначальный баланс начисления равен 0, статус обработки — NEW
-	err = s.userRepo.CreateOrder(ctx, orderID, userID, "NEW")
+	err = s.orderRepo.CreateOrder(ctx, orderID, userID, "NEW")
 	if err != nil {
 		log.Error("Не удалось сохранить новый заказ в базу данных", err)
 		return fmt.Errorf("failed to save new order: %w", err)
@@ -251,7 +266,7 @@ func (s *LoyaltyService) GetOrders(ctx context.Context, userID string) ([]domain
 	userLogger := s.logger.With(ulog.String("user_id", userID))
 	userLogger.Debug("Запрос списка заказов для пользователя")
 
-	orders, err := s.userRepo.GetOrdersByUserID(ctx, userID)
+	orders, err := s.orderRepo.GetOrdersByUserID(ctx, userID)
 	if err != nil {
 		userLogger.Error("Ошибка получения списка заказов польователя из репозитория", err)
 		return nil, fmt.Errorf("loyalty_service: failed to fetch user orders: %w", err)
@@ -265,7 +280,7 @@ func (s *LoyaltyService) GetBalance(ctx context.Context, userID string) (decimal
 	userLogger := s.logger.With(ulog.String("user_id", userID))
 	userLogger.Debug("Запрос баланса для пользователя")
 
-	current, withdrawn, err := s.userRepo.GetUserBalance(ctx, userID)
+	current, withdrawn, err := s.balanceRepo.GetUserBalance(ctx, userID)
 	if err != nil {
 		userLogger.Error("Ошибка запроса баланса пользователя", err)
 		return decimal.Zero, decimal.Zero, fmt.Errorf("loyalty_service: failed to get user balance: %w", err)
@@ -274,6 +289,6 @@ func (s *LoyaltyService) GetBalance(ctx context.Context, userID string) (decimal
 	return current, withdrawn, nil
 }
 
-func (s *LoyaltyService) Test() {
-
+func (s *LoyaltyService) TokenTTL() time.Duration {
+	return s.tokenTTL
 }
