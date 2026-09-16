@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
 )
 
@@ -35,8 +34,6 @@ func (h *UserHandler) AuthMiddleware(next http.Handler) http.Handler {
 		// 2. Делегируем всю криптографию и валидацию сервису
 		userID, err := h.service.ValidateToken(r.Context(), tokenString)
 		if err != nil {
-			log.Println(tokenString)
-			log.Println(err)
 			// Любая ошибка валидации токена означает сброс авторизации
 			http.Error(w, "Invalid or expired token", http.StatusUnauthorized) // 401
 			return
