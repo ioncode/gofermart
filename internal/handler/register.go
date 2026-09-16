@@ -45,14 +45,15 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Автоматическая аутентификация: записываем токен в куку
+	ttl := h.service.TokenTTL()
 	http.SetCookie(w, &http.Cookie{
 		Name:     "auth_token",
 		Value:    token,
 		Path:     "/",
-		Expires:  time.Now().Add(h.service.TokenTTL()),
-		MaxAge:   int(h.service.TokenTTL().Seconds()),
-		HttpOnly: true,  // Защита от XSS
-		Secure:   false, // Только для HTTPS
+		Expires:  time.Now().Add(ttl),
+		MaxAge:   int(ttl.Seconds()),
+		HttpOnly: true, // Защита от XSS
+		Secure:   h.isProd,
 		SameSite: http.SameSiteLaxMode,
 	})
 

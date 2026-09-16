@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+//go:generate mockgen -source=handler.go -destination=../service/mocks/mock_loyalty.go -package=mocks
 type LoyaltyService interface {
 	Register(ctx context.Context, login string, password string) (token string, err error)
 	TokenTTL() time.Duration

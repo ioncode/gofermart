@@ -42,14 +42,16 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. Установка JWT-токена в cookies (в соответствии с ТЗ)
+	ttl := h.service.TokenTTL()
 	http.SetCookie(w, &http.Cookie{
 		Name:     "auth_token",
 		Value:    token,
 		Path:     "/",
-		Expires:  time.Now().Add(24 * time.Hour), // Время жизни куки совпадает с TTL токена
-		HttpOnly: true,                           // Защита от кражи токена скриптами через XSS-атаки
-		Secure:   h.isProd,                       // Включаем только для HTTPS сред
-		SameSite: http.SameSiteLaxMode,           // Базовая защита от CSRF-атак
+		Expires:  time.Now().Add(ttl),
+		MaxAge:   int(ttl.Seconds()),
+		HttpOnly: true,                 // Защита от кражи токена скриптами через XSS-атаки
+		Secure:   h.isProd,             // Включаем только для HTTPS сред
+		SameSite: http.SameSiteLaxMode, // Базовая защита от CSRF-атак
 	})
 
 	// 200 — пользователь успешно аутентифицирован
