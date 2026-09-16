@@ -8,6 +8,7 @@ import (
 
 	json "github.com/goccy/go-json"
 	"github.com/ioncode/gofermart/internal/service"
+	"github.com/ioncode/gofermart/pkg/luhn"
 )
 
 // UploadOrder обрабатывает HTTP-запрос POST /api/user/orders.
@@ -40,7 +41,7 @@ func (h *UserHandler) UploadOrder(w http.ResponseWriter, r *http.Request) {
 	orderID := strings.TrimSpace(string(bodyBytes))
 
 	// 5. Проверяем валидность номера заказа по алгоритму Луна
-	if !IsValidLuhn(orderID) {
+	if !luhn.IsValid(orderID) {
 		http.Error(w, "Invalid order number format (Luhn check failed)", http.StatusUnprocessableEntity) // 422
 		return
 	}

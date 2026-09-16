@@ -9,6 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/ioncode/gofermart/internal/domain"
 	"github.com/ioncode/gofermart/internal/repository"
+	"github.com/ioncode/gofermart/pkg/luhn"
 	"github.com/ioncode/ulog/v3"
 	"github.com/shopspring/decimal"
 	"golang.org/x/crypto/bcrypt"
@@ -19,6 +20,7 @@ var (
 	ErrInvalidCredentials       = errors.New("invalid login or password")
 	ErrOrderUploadedBySameUser  = errors.New("order already uploaded by this user")
 	ErrOrderUploadedByOtherUser = errors.New("order already uploaded by another user")
+	ErrInvalidOrderNumber       = errors.New("invalid order number")
 )
 
 type LoyaltyService struct {
@@ -288,4 +290,23 @@ func (s *LoyaltyService) GetBalance(ctx context.Context, userID string) (decimal
 
 func (s *LoyaltyService) TokenTTL() time.Duration {
 	return s.tokenTTL
+}
+
+func (s *LoyaltyService) Withdraw(ctx context.Context, userID string, orderID string, amount decimal.Decimal) error {
+	// 1. Валидируем номер по алгоритму Луна
+	if !luhn.IsValid(orderID) {
+		return ErrInvalidOrderNumber
+	}
+
+	// 2. Проводим списание через репозиторий
+	err := s.balanceRepo.WithdrawPoints(ctx, userID, orderID, amount)
+	if err != nil {
+		return fmt.Errorf("service: failed to withdraw: %w", err)
+	}
+
+	return nil
+}
+
+func (s *LoyaltyService) GetWithdrawals(ctx context.Context, userID string) ([]domain.Withdrawal, error) {
+	return s.balanceRepo.GetWithdrawals(ctx, userID)
 }

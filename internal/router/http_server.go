@@ -41,9 +41,9 @@ func NewServer(addr string, userHandler *handler.UserHandler, logger ulog.Logger
 			r.Get("/orders", userHandler.GetOrders)
 
 			r.Get("/balance", userHandler.GetBalance)
-			// r.Post("/balance/withdraw", userHandler.Withdraw)
+			r.Post("/balance/withdraw", userHandler.Withdraw)
 
-			// r.Get("/withdrawals", userHandler.GetWithdrawals)
+			r.Get("/withdrawals", userHandler.GetWithdrawals)
 		})
 	})
 

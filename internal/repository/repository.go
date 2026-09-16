@@ -10,9 +10,10 @@ import (
 
 // Доменные ошибки репозитория
 var (
-	ErrDuplicateLogin = errors.New("login already exists in database")
-	ErrUserNotFound   = errors.New("user not found")
-	ErrOrderNotFound  = errors.New("order not found")
+	ErrDuplicateLogin    = errors.New("login already exists in database")
+	ErrUserNotFound      = errors.New("user not found")
+	ErrOrderNotFound     = errors.New("order not found")
+	ErrInsufficientFunds = errors.New("insufficient funds on user balance")
 )
 
 // UserRepository описывает методы для работы с таблицей пользователей
@@ -40,6 +41,8 @@ type OrderRepository interface {
 type BalanceRepository interface {
 	// GetUserBalance возвращает данные о текущей сумме баллов лояльности, а также сумме использованных за весь период регистрации баллов.
 	GetUserBalance(ctx context.Context, userID string) (decimal.Decimal, decimal.Decimal, error)
+	WithdrawPoints(ctx context.Context, userID string, orderID string, amount decimal.Decimal) error
+	GetWithdrawals(ctx context.Context, userID string) ([]domain.Withdrawal, error)
 }
 
 // OrderAccrualRepository фасадный репозиторий, инкапсулирующий транзакционную атомарную операцию

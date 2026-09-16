@@ -108,7 +108,7 @@ func (r *OrderRepository) GetUnprocessedOrders(ctx context.Context) ([]domain.Or
 
 // GetOrdersByUserID возвращает список всех заказов конкретного пользователя.
 //
-// Выборка сортируется по времени загрузки от самых старых к самым новым (ASC)
+// Выборка сортируется по времени загрузки от самых новых к самым старым (DESC)
 // согласно требованиям технического задания. Поля типов NUMERIC/DECIMAL автоматически
 // сканируются в высокоточную структуру домена лояльности decimal.Decimal.
 //
@@ -117,7 +117,7 @@ func (r *OrderRepository) GetOrdersByUserID(ctx context.Context, userID string) 
 	query := `SELECT id, user_id, status, accrual, uploaded_at 
 	          FROM orders 
 	          WHERE user_id = $1 
-	          ORDER BY uploaded_at ASC`
+	          ORDER BY uploaded_at DESC`
 
 	rows, err := r.db.Query(ctx, query, userID)
 	if err != nil {

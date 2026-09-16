@@ -17,8 +17,8 @@ type LoyaltyService interface {
 	ValidateToken(ctx context.Context, tokenString string) (userID string, err error)
 	GetOrders(ctx context.Context, userID string) ([]domain.Order, error)
 	GetBalance(ctx context.Context, userID string) (decimal.Decimal, decimal.Decimal, error)
-	// Withdraw(ctx context.Context, userID string, sum float64, orderID string) error
-	// GetWithdrawals(ctx context.Context, userID string) ([]byte, error)
+	Withdraw(ctx context.Context, userID string, orderID string, amount decimal.Decimal) error
+	GetWithdrawals(ctx context.Context, userID string) ([]domain.Withdrawal, error)
 }
 
 type UserHandler struct {
