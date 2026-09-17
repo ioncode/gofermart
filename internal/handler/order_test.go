@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -222,4 +224,89 @@ func TestUserHandler_GetOrders(t *testing.T) {
 
 		assert.Equal(t, http.StatusInternalServerError, rec.Code) // 500
 	})
+}
+
+func TestUserHandler_GetOrders_Concurrency(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	logger := uzerolog.NewZerologAdapter(zerolog.New(nil))
+	mockSvc := mocks.NewMockLoyaltyService(ctrl)
+	h := NewUserHandler(mockSvc, false, logger)
+
+	// Количество параллельных горутин
+	const workers = 50
+	var wg sync.WaitGroup
+	wg.Add(workers)
+
+	// Запускаем конкурентные запросы
+	for i := 0; i < workers; i++ {
+		go func(workerID int) {
+			defer wg.Done()
+
+			// Формируем уникальные данные, чтобы проверить отсутствие пересечений в памяти
+			userID := fmt.Sprintf("user-%d", workerID)
+			orderID := fmt.Sprintf("order-id-%d", workerID)
+
+			mockOrders := []domain.Order{
+				{
+					ID:         orderID,
+					UserID:     userID,
+					Status:     domain.StatusProcessed,
+					UploadedAt: time.Now(),
+				},
+			}
+
+			// Блокируем мьютекс на время регистрации ожидания в моке
+			mockSvc.EXPECT().
+				GetOrders(gomock.Any(), userID).
+				Return(mockOrders, nil).
+				Times(1)
+
+			// Формируем контекст и http-запрос
+			ctx := context.WithValue(context.Background(), userIDContextKey, userID)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/api/user/orders", nil)
+			if err != nil {
+				t.Errorf("Worker %d: failed to create request: %v", workerID, err)
+				return
+			}
+
+			rec := httptest.NewRecorder()
+
+			// Вызываем хендлер
+			h.GetOrders(rec, req)
+
+			// Базовые проверки HTTP-ответа
+			if rec.Code != http.StatusOK {
+				t.Errorf("Worker %d: expected status 200, got %d", workerID, rec.Code)
+				return
+			}
+
+			if rec.Header().Get("Content-Type") != "application/json" {
+				t.Errorf("Worker %d: expected Content-Type application/json, got %s", workerID, rec.Header().Get("Content-Type"))
+				return
+			}
+
+			// Десериализуем и строго проверяем, что данные принадлежат ИМЕННО этому воркеру
+			var result []domain.Order
+			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+				t.Errorf("Worker %d: failed to unmarshal JSON: %v. Body: %s", workerID, err, rec.Body.String())
+				return
+			}
+
+			if len(result) != 1 {
+				t.Errorf("Worker %d: expected 1 order, got %d", workerID, len(result))
+				return
+			}
+
+			// Проверяем первый элемент массива на загрязнение данных (Data Contamination)
+			if result[0].ID != orderID {
+				t.Errorf("Worker %d: DATA CONTAMINATION DETECTED! Expected order %s, but got order %s",
+					workerID, orderID, result[0].ID)
+			}
+		}(i)
+	}
+
+	// Ожидаем завершения работы всех горутин
+	wg.Wait()
 }
