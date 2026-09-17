@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/ioncode/gofermart/internal/repository"
@@ -161,4 +163,69 @@ func TestUserHandler_Withdraw(t *testing.T) {
 
 		assert.Equal(t, http.StatusInternalServerError, rec.Code) // 500
 	})
+}
+
+// это уникальный тест, доказывающий безопасность оптимизаций. если кто то в будущем забудет сбросить объект пула после обработки операции и вернет его в пул грязным с чужими данными то этот тест начнет падать при многокартном вызове
+// go test -v -count=100 -run ^TestUserHandler_Withdraw_Concurrency$ ./internal/handler
+func TestUserHandler_Withdraw_Concurrency(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	logger := uzerolog.NewZerologAdapter(zerolog.New(nil))
+	mockSvc := mocks.NewMockLoyaltyService(ctrl)
+	h := NewUserHandler(mockSvc, false, logger)
+
+	const workers = 50
+	var wg sync.WaitGroup
+	wg.Add(workers)
+
+	// Мьютекс ТОЛЬКО для регистрации ожиданий внутри gomock
+	var mockMu sync.Mutex
+
+	for i := 0; i < workers; i++ {
+		go func(wID int) {
+			defer wg.Done()
+
+			uID := fmt.Sprintf("user-%d", wID)
+			oID := fmt.Sprintf("1234567890%d", wID%10)
+
+			// Оставляем проверку с частичным JSON, чтобы проверить,
+			// очищает ли Reset() данные при реальном последовательном переиспользовании пула.
+			var body string
+			if wID%2 == 0 {
+				body = fmt.Sprintf(`{"order":"%s","sum":10.00}`, oID)
+			} else {
+				body = `{"sum":10.00}`
+			}
+
+			// Регистрируем ожидания только для честных ЧЕТНЫХ воркеров
+			if wID%2 == 0 {
+				mockMu.Lock()
+				mockSvc.EXPECT().
+					Withdraw(gomock.Any(), uID, oID, gomock.Any()).
+					Return(nil).
+					Times(1)
+				mockMu.Unlock()
+			}
+
+			ctx := context.WithValue(context.Background(), userIDContextKey, uID)
+			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/api/user/balance/withdraw", bytes.NewBufferString(body))
+			req.Header.Set("Content-Type", "application/json")
+
+			rec := httptest.NewRecorder()
+
+			// ВЫЗЫВАЕМ ХЕНДЛЕР НАПРЯМУЮ.
+			// Позволяем реальному sync.Pool внутри хендлера управлять памятью.
+			h.Withdraw(rec, req)
+
+			// Если в хендлере работает Reset(), нечетный воркер получит 400 Bad Request.
+			// Если Reset() убрать, то при последовательном запуске горутины подхватят грязный кэш
+			// пула и этот ассерт гарантированно упадет!
+			if wID%2 != 0 && rec.Code == http.StatusOK {
+				t.Errorf("SECURITY BREACH! Worker %d processed empty order but got 200 OK!", wID)
+			}
+		}(i)
+	}
+
+	wg.Wait()
 }

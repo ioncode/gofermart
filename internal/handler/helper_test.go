@@ -186,13 +186,15 @@ func BenchmarkPureOptimized(b *testing.B) {
 	req := httptest.NewRequest(http.MethodPost, "/", data.body)
 	req.Header.Set("Content-Type", "application/json")
 
-	var dst testTarget
+	// Выделяем память под структуру один раз до сброса таймера,
+	// чтобы тест замерял исключительно перформанс самого хелпера.
+	dst := new(testTarget)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = data.body.Seek(0, io.SeekStart)
 
-		_ = ReadJSONOptimized(rec, req, &dst)
+		_ = ReadJSONOptimized(rec, req, dst)
 	}
 }
 

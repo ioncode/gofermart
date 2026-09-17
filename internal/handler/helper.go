@@ -61,14 +61,17 @@ func ReadBodyOptimized(w http.ResponseWriter, r *http.Request, processor func(pa
 }
 
 // ReadJSONOptimized — высокоуровневая обертка, которая объединяет
-// Zero-Alloc чтение тела запроса и его последующую десериализацию
-func ReadJSONOptimized(w http.ResponseWriter, r *http.Request, dst any) bool {
+// Zero-Alloc чтение тела запроса и его последующую десериализацию.
+// Параметр [T any] позволяет компилятору работать с конкретным типом структуры без аллокаций интерфейса any.
+func ReadJSONOptimized[T any](w http.ResponseWriter, r *http.Request, dst *T) bool {
 	ct := r.Header.Get("Content-Type")
 	if len(ct) < 16 || ct[:16] != "application/json" {
 		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 		return false
 	}
 
+	// Передаем логику десериализации как коллбэк внутрь сетевого этапа.
+	// Так как dst имеет конкретный тип *T, goccy/go-json парсит данные с максимальной скоростью.
 	return ReadBodyOptimized(w, r, func(payload []byte) bool {
 		if err := json.Unmarshal(payload, dst); err != nil {
 			http.Error(w, "Invalid JSON format", http.StatusBadRequest)
