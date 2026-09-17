@@ -24,12 +24,6 @@ var bodyBufferPool = sync.Pool{
 // ReadBodyOptimized теперь принимает коллбэк processor.
 // Срез байт не "убегает" из функции, что гарантирует 0 аллокаций в куче.
 func ReadBodyOptimized(w http.ResponseWriter, r *http.Request, processor func(payload []byte) error) bool {
-	// 1. Валидация заголовка
-	ct := r.Header.Get("Content-Type")
-	if len(ct) < 16 || ct[:16] != "application/json" {
-		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
-		return false
-	}
 
 	// 2. Берем буфер из пула
 	bufPtr := bodyBufferPool.Get().(*[]byte)
@@ -66,7 +60,13 @@ func ReadBodyOptimized(w http.ResponseWriter, r *http.Request, processor func(pa
 // ReadJSONOptimized — высокоуровневая обертка, которая объединяет
 // Zero-Alloc чтение тела запроса и его последующую десериализацию
 func ReadJSONOptimized(w http.ResponseWriter, r *http.Request, dst any) bool {
-	// Передаем логику десериализации как коллбэк внутрь сетевого этапа
+	// 1. Валидация заголовка
+	ct := r.Header.Get("Content-Type")
+	if len(ct) < 16 || ct[:16] != "application/json" {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return false
+	}
+	// 2. Передаем логику десериализации как коллбэк внутрь сетевого этапа
 	return ReadBodyOptimized(w, r, func(payload []byte) error {
 		return json.Unmarshal(payload, dst)
 	})
