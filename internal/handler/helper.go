@@ -11,25 +11,33 @@ import (
 
 const MaxBodySize = 4096
 
-// Инициализируем пул буферов размером на 1 байт больше лимита (4097 байт).
-// Это позволяет поймать превышение размера (Overflow) без вызова добавочного io.Read
-// и полностью устраняет необходимость аллокации временных слайсов типа make([]byte, 1).
-var bodyBufferPool = sync.Pool{
+// Универсальный пул буферов.
+// Хранит указатели на слайсы с длиной 0, но емкостью 4097 байт.
+var bytesBufferPool = sync.Pool{
 	New: func() any {
-		b := make([]byte, MaxBodySize+1)
+		// len = 0, cap = 4097
+		b := make([]byte, 0, MaxBodySize+1)
 		return &b
 	},
 }
 
 // ReadBodyOptimized теперь принимает коллбэк processor.
 // Срез байт не "убегает" из функции, что гарантирует 0 аллокаций в куче.
-func ReadBodyOptimized(w http.ResponseWriter, r *http.Request, processor func(payload []byte) error) bool {
+func ReadBodyOptimized(w http.ResponseWriter, r *http.Request, processor func(payload []byte) bool) bool {
 
 	// 2. Берем буфер из пула
-	bufPtr := bodyBufferPool.Get().(*[]byte)
-	buf := *bufPtr
-	defer bodyBufferPool.Put(bufPtr)
-	defer r.Body.Close()
+	bufPtr := bytesBufferPool.Get().(*[]byte)
+	// Безопасность: проверяем, хватает ли емкости буфера из пула для чтения тела запроса
+	if cap(*bufPtr) < MaxBodySize+1 {
+		// Если пул вернул маленький буфер, перевыделяем его до безопасного размера
+		*bufPtr = make([]byte, MaxBodySize+1)
+	}
+	// Расширяем длину слайса до максимума для io.ReadFull
+	buf := (*bufPtr)[:MaxBodySize+1]
+	defer func() {
+		bytesBufferPool.Put(bufPtr)
+		r.Body.Close()
+	}()
 
 	// 3. Чтение потока
 	n, err := io.ReadFull(r.Body, buf)
@@ -49,25 +57,23 @@ func ReadBodyOptimized(w http.ResponseWriter, r *http.Request, processor func(pa
 
 	// 4. Передаем срез во внутренний обработчик.
 	// Так как мы находимся внутри функции, Slice Header не аллоцируется в куче!
-	if err := processor(buf[:n]); err != nil {
-		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
-		return false
-	}
-
-	return true
+	return processor(buf[:n])
 }
 
 // ReadJSONOptimized — высокоуровневая обертка, которая объединяет
 // Zero-Alloc чтение тела запроса и его последующую десериализацию
 func ReadJSONOptimized(w http.ResponseWriter, r *http.Request, dst any) bool {
-	// 1. Валидация заголовка
 	ct := r.Header.Get("Content-Type")
 	if len(ct) < 16 || ct[:16] != "application/json" {
 		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 		return false
 	}
-	// 2. Передаем логику десериализации как коллбэк внутрь сетевого этапа
-	return ReadBodyOptimized(w, r, func(payload []byte) error {
-		return json.Unmarshal(payload, dst)
+
+	return ReadBodyOptimized(w, r, func(payload []byte) bool {
+		if err := json.Unmarshal(payload, dst); err != nil {
+			http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+			return false
+		}
+		return true
 	})
 }

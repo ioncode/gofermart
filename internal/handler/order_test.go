@@ -98,8 +98,8 @@ func TestUserHandler_UploadOrder(t *testing.T) {
 
 	t.Run("Request Body Too Large 413", func(t *testing.T) {
 		ctx := context.WithValue(context.Background(), userIDContextKey, userID)
-		// Генерируем заведомо длинное тело запроса (больше 128 байт)
-		largeBody := string(make([]byte, 210))
+		// Генерируем заведомо длинное тело запроса (больше 4096 байт в MaxBodySize)
+		largeBody := string(make([]byte, MaxBodySize+1))
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "/api/user/orders", bytes.NewBufferString(largeBody))
 		require.NoError(t, err)
 

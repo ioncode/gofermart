@@ -242,8 +242,8 @@ func BenchmarkStage1_ReadBody(b *testing.B) {
 
 	// Пустой коллбэк, который ничего не делает с байтами,
 	// чтобы замерить чистую скорость сетевого слоя.
-	noopProcessor := func(payload []byte) error {
-		return nil
+	noopProcessor := func(payload []byte) bool {
+		return true
 	}
 
 	b.ResetTimer()
