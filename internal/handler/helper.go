@@ -21,9 +21,10 @@ var bodyBufferPool = sync.Pool{
 	},
 }
 
-// ReadJSONOptimized вычитывает и десериализует JSON с гарантированными 0 аллокаций.
-func ReadJSONOptimized(w http.ResponseWriter, r *http.Request, dst any) bool {
-	// 1. Быстрая валидация Content-Type без тяжелого парсинга строк
+// ReadBodyOptimized теперь принимает коллбэк processor.
+// Срез байт не "убегает" из функции, что гарантирует 0 аллокаций в куче.
+func ReadBodyOptimized(w http.ResponseWriter, r *http.Request, processor func(payload []byte) error) bool {
+	// 1. Валидация заголовка
 	ct := r.Header.Get("Content-Type")
 	if len(ct) < 16 || ct[:16] != "application/json" {
 		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
@@ -36,32 +37,37 @@ func ReadJSONOptimized(w http.ResponseWriter, r *http.Request, dst any) bool {
 	defer bodyBufferPool.Put(bufPtr)
 	defer r.Body.Close()
 
-	// 3. Читаем поток. Мы запрашиваем ровно MaxBodySize + 1 байт.
+	// 3. Чтение потока
 	n, err := io.ReadFull(r.Body, buf)
-
-	// Если прочитано больше, чем MaxBodySize (то есть n == 4097) — запрос слишком большой
 	if n > MaxBodySize {
 		http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
 		return false
 	}
 
-	// 4. Обрабатываем стандартные ошибки чтения
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		if errors.Is(err, io.EOF) {
 			http.Error(w, "Request body is empty", http.StatusBadRequest)
-			return false
+		} else {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		}
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return false
 	}
 
-	// 5. Выделяем точный слайс с данными
-	payload := buf[:n]
-
-	if err := json.Unmarshal(payload, dst); err != nil {
+	// 4. Передаем срез во внутренний обработчик.
+	// Так как мы находимся внутри функции, Slice Header не аллоцируется в куче!
+	if err := processor(buf[:n]); err != nil {
 		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
 		return false
 	}
 
 	return true
+}
+
+// ReadJSONOptimized — высокоуровневая обертка, которая объединяет
+// Zero-Alloc чтение тела запроса и его последующую десериализацию
+func ReadJSONOptimized(w http.ResponseWriter, r *http.Request, dst any) bool {
+	// Передаем логику десериализации как коллбэк внутрь сетевого этапа
+	return ReadBodyOptimized(w, r, func(payload []byte) error {
+		return json.Unmarshal(payload, dst)
+	})
 }

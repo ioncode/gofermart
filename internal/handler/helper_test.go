@@ -232,3 +232,37 @@ func BenchmarkPureDecoder(b *testing.B) {
 		_ = ReadJSONDecoderWithGoccy(rec, req, &dst)
 	}
 }
+
+func BenchmarkStage1_ReadBody(b *testing.B) {
+	jsonBody := `{"login":"benchmark_user_name_test","password":"super_secure_password_string_123"}`
+	data := prepareBenchmarkData(jsonBody)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/", data.body)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Пустой коллбэк, который ничего не делает с байтами,
+	// чтобы замерить чистую скорость сетевого слоя.
+	noopProcessor := func(payload []byte) error {
+		return nil
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = data.body.Seek(0, io.SeekStart)
+
+		// Вызываем чтение с коллбэком
+		_ = ReadBodyOptimized(rec, req, noopProcessor)
+	}
+}
+
+// 2. Проверяем парсинг JSON из уже готового буфера
+func BenchmarkStage2_Unmarshal(b *testing.B) {
+	payload := []byte(`{"login":"benchmark_user_name_test","password":"super_secure_password_string_123"}`)
+	var dst testTarget
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Замеряем только то, что делает внешняя библиотека
+		_ = json.Unmarshal(payload, &dst)
+	}
+}
