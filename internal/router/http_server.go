@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -26,6 +27,10 @@ func NewServer(addr string, userHandler *handler.UserHandler, logger ulog.Logger
 	r.Use(ulog.TraceIDMiddleware)
 	r.Use(ulog.RecoveryMiddleware(logger))
 	r.Use(ulog.LoggingMiddleware(logger))
+	r.Use(middleware.Timeout(60 * time.Second))
+
+	// DoS для чтения через helper
+	r.Use(MaxBytesMiddleware(handler.MaxBodySize))
 
 	// Группировка эндпоинтов согласно ТЗ накопительной системы
 	r.Route("/api/user", func(r chi.Router) {
@@ -69,4 +74,19 @@ func (s *Server) Start() {
 func (s *Server) Stop(ctx context.Context) error {
 	s.logger.Info("Завершение и обработка оставшихся запросов...")
 	return s.httpServer.Shutdown(ctx)
+}
+
+// MaxBytesMiddleware ограничивает размер тела запроса фиксированным лимитом.
+// При превышении лимита http.MaxBytesReader возвращает "http: request body too large"
+// и аппаратно разрывает TCP-соединение на уровне ядра ОС при r.Body.Close().
+func MaxBytesMiddleware(maxSize int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Оборачиваем оригинальный r.Body в лимитер.
+			// Объект MaxBytesReader выделится в куче ОДИН РАЗ на уровне роутера,
+			// что полностью изолирует наш горячий helper.go от аллокаций.
+			r.Body = http.MaxBytesReader(w, r.Body, maxSize)
+			next.ServeHTTP(w, r)
+		})
+	}
 }

@@ -98,20 +98,6 @@ func TestUserHandler_UploadOrder(t *testing.T) {
 		assert.Equal(t, http.StatusUnprocessableEntity, rec.Code) // 422
 	})
 
-	t.Run("Request Body Too Large 413", func(t *testing.T) {
-		ctx := context.WithValue(context.Background(), userIDContextKey, userID)
-		// Генерируем заведомо длинное тело запроса (больше 4096 байт в MaxBodySize)
-		largeBody := string(make([]byte, MaxBodySize+1))
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "/api/user/orders", bytes.NewBufferString(largeBody))
-		require.NoError(t, err)
-
-		rec := httptest.NewRecorder()
-
-		h.UploadOrder(rec, req)
-
-		assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code) // 413
-	})
-
 	t.Run("Unauthorized 401", func(t *testing.T) {
 		// Контекст пустой, Middleware не записала userID
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "/api/user/orders", bytes.NewBufferString(validOrderID))

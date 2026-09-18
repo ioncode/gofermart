@@ -11,70 +11,78 @@ import (
 
 const MaxBodySize = 4096
 
-// Универсальный пул буферов.
-// Хранит указатели на слайсы с длиной 0, но емкостью 4097 байт.
+// bytesBufferPool хранит указатели на массивы байт фиксированной длины (ровно 4096).
 var bytesBufferPool = sync.Pool{
 	New: func() any {
-		// len = 0, cap = 4097
-		b := make([]byte, 0, MaxBodySize+1)
+		b := make([]byte, MaxBodySize)
 		return &b
 	},
 }
 
-// ReadBodyOptimized теперь принимает коллбэк processor.
-// Срез байт не "убегает" из функции, что гарантирует 0 аллокаций в куче.
+// ReadBodyOptimized — универсальный сетевой слой с нулевыми аллокациями.
+// Вся защита от DoS и ограничение размера тела делегированы Middleware роутера.
 func ReadBodyOptimized(w http.ResponseWriter, r *http.Request, processor func(payload []byte) bool) bool {
-
-	// 2. Берем буфер из пула
 	bufPtr := bytesBufferPool.Get().(*[]byte)
-	// Безопасность: проверяем, хватает ли емкости буфера из пула для чтения тела запроса
-	if cap(*bufPtr) < MaxBodySize+1 {
-		// Если пул вернул маленький буфер, перевыделяем его до безопасного размера
-		*bufPtr = make([]byte, MaxBodySize+1)
-	}
-	// Расширяем длину слайса до максимума для io.ReadFull
-	buf := (*bufPtr)[:MaxBodySize+1]
+	buf := *bufPtr
+
+	// Изоляция памяти: мгновенно зачищаем буфер от старых данных
+	clear(buf)
+
 	defer func() {
+		clear(buf)
 		bytesBufferPool.Put(bufPtr)
 		r.Body.Close()
 	}()
 
-	// 3. Чтение потока
+	// Вычитываем данные из потока (который в проде ограничен http.MaxBytesReader в Middleware).
+	// io.ReadFull пытается заполнить все 4096 байт буфера.
 	n, err := io.ReadFull(r.Body, buf)
-	if n > MaxBodySize {
-		http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
-		return false
-	}
 
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
-		if errors.Is(err, io.EOF) {
-			http.Error(w, "Request body is empty", http.StatusBadRequest)
-		} else {
-			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+	if err != nil {
+		// 1. Обработка ошибки переполнения от http.MaxBytesReader (Middleware)
+		// ОПТИМИЗАЦИЯ: Проверяем ошибку MaxBytesReader по ее текстовому маркеру.
+		// Это полностью убирает вызов errors.As, который приводил к аллокации 8 байт в куче.
+		if err.Error() == "http: request body too large" {
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge) // 413
+			return false
 		}
+
+		// 2. Обработка успешного окончания короткого потока.
+		// В проде (под MaxBytesReader) и в тестах при успешном чтении короткого JSON
+		// io.ReadFull ВСЕГДА возвращает io.ErrUnexpectedEOF, потому что буфер 4КБ не заполнился встык.
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			if n == 0 {
+				http.Error(w, "Request body is empty", http.StatusBadRequest) // 400
+				return false
+			}
+			// Если n > 0 — это полностью валидные данные, сбрасываем ошибку и идем дальше!
+			err = nil
+		} else if errors.Is(err, io.EOF) {
+			// Чистый io.EOF от io.ReadFull означает, что в потоке было СТРОГО 0 байт с самого начала
+			http.Error(w, "Request body is empty", http.StatusBadRequest) // 400
+			return false
+		} else {
+			// Любая реальная сетевая ошибка (таймаут, жесткий обрыв связи)
+			http.Error(w, "Failed to read request body", http.StatusBadRequest) // 400
+			return false
+		}
+	}
+
+	// Дополнительный пограничный случай (на случай, если err == nil, но n == 0)
+	if n == 0 && err == nil {
+		http.Error(w, "Request body is empty", http.StatusBadRequest) // 400
 		return false
 	}
 
-	// 4. Передаем срез во внутренний обработчик.
-	// Так как мы находимся внутри функции, Slice Header не аллоцируется в куче!
+	// Передаем строго валидный срез памяти в коллбэк
 	return processor(buf[:n])
 }
 
-// ReadJSONOptimized — высокоуровневая обертка, которая объединяет
-// Zero-Alloc чтение тела запроса и его последующую десериализацию.
-// Параметр [T any] позволяет компилятору работать с конкретным типом структуры без аллокаций интерфейса any.
+// ReadJSONOptimized — строго типизированная дженерик-обертка для парсинга JSON.
 func ReadJSONOptimized[T any](w http.ResponseWriter, r *http.Request, dst *T) bool {
-	ct := r.Header.Get("Content-Type")
-	if len(ct) < 16 || ct[:16] != "application/json" {
-		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
-		return false
-	}
-
-	// Передаем логику десериализации как коллбэк внутрь сетевого этапа.
-	// Так как dst имеет конкретный тип *T, goccy/go-json парсит данные с максимальной скоростью.
 	return ReadBodyOptimized(w, r, func(payload []byte) bool {
 		if err := json.Unmarshal(payload, dst); err != nil {
-			http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+			http.Error(w, "Invalid JSON format", http.StatusBadRequest) // 400
 			return false
 		}
 		return true

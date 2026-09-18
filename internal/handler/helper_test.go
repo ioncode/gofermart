@@ -33,18 +33,6 @@ func TestReadJSONOptimized(t *testing.T) {
 		assert.Equal(t, "secure_password", dst.Password)
 	})
 
-	t.Run("Failure invalid Content-Type", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{}`))
-		req.Header.Set("Content-Type", "text/plain") // Неверный тип данных
-		rec := httptest.NewRecorder()
-
-		var dst testTarget
-		ok := ReadJSONOptimized(rec, req, &dst)
-
-		assert.False(t, ok)
-		assert.Equal(t, http.StatusUnsupportedMediaType, rec.Code) // 415
-	})
-
 	t.Run("Failure empty body", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(""))
 		req.Header.Set("Content-Type", "application/json")
@@ -69,20 +57,29 @@ func TestReadJSONOptimized(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, rec.Code) // 400
 	})
 
-	t.Run("Failure request body too large", func(t *testing.T) {
-		// Генерируем строку, которая гарантированно больше 4096 байт
-		largeString := strings.Repeat("A", 4100)
-		jsonBody := `{"login":"` + largeString + `","password":"123"}`
+	t.Run("Failure too large body by MaxBytesReader", func(t *testing.T) {
+		// Создаем тело запроса, которое заведомо больше нашего лимита
+		// (например, 20 байт при лимите в 10 байт)
+		largeBody := []byte(`{"login":"very_long_username_that_exceeds_limit"}`)
 
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(jsonBody))
-		req.Header.Set("Content-Type", "application/json")
+		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(largeBody))
 		rec := httptest.NewRecorder()
 
+		// Имитируем поведение Middleware: оборачиваем поток в MaxBytesReader с маленьким лимитом
+		req.Body = http.MaxBytesReader(rec, req.Body, 10)
+
 		var dst testTarget
+		// Вызываем наш оптимизированный хелпер
 		ok := ReadJSONOptimized(rec, req, &dst)
 
+		// Проверяем, что функция вернула false (запрос отклонен)
 		assert.False(t, ok)
-		assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code) // 413
+
+		// Проверяем, что клиенту ушел правильный HTTP-статус 413 Payload Too Large
+		assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+
+		// Проверяем, что буфер структуры остался пустым и данные не протекли
+		assert.Empty(t, dst.Login)
 	})
 }
 

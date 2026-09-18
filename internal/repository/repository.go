@@ -51,5 +51,6 @@ type BalanceRepository interface {
 type OrderAccrualRepository interface {
 	// UpdateOrderAndBalance переводит заказ в новый статус и начисляет баллы лояльности.
 	// Метод должен выполняться внутри ACID-транзакции: обновление таблицы заказов и баланса пользователя.
+	// аргумент статуса передается строкой (не доменной константой) для обработки финальных статусов двух систем, которые идентичны по значению (INVALID, PROCESSED)
 	UpdateOrderAndBalance(ctx context.Context, orderID string, userID string, status string, accrual decimal.Decimal) error
 }
