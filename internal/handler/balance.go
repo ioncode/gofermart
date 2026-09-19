@@ -1,3 +1,5 @@
+// Пакет handler содержит обработчики входящих HTTP-запросов и веб-интерфейсы
+// накопительной системы лояльности «Гофермарт».
 package handler
 
 import (
@@ -6,31 +8,42 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// balanceDTO описывает транспортную структуру ответа API баланса.
-// Находится в слое хендлеров для изоляции логики отображения JSON.
+// balanceDTO описывает транспортную структуру ответа API для отображения баланса.
+// Используется в слое хендлеров для изоляции доменных моделей от деталей сериализации JSON.
 type balanceDTO struct {
-	Current   decimal.Decimal `json:"current"`
+	// Current хранит текущую сумму доступных баллов лояльности на счету пользователя .
+	Current decimal.Decimal `json:"current"`
+
+	// Withdrawn хранит общую сумму баллов лояльности, списанных за всё время.
 	Withdrawn decimal.Decimal `json:"withdrawn"`
 }
 
-// GetBalance возвращает JSON с текущим балансом и списаниями авторизованного пользователя.
-// Хендлер привязан к маршруту: GET /api/user/balance
+// GetBalance возвращает JSON-ответ с текущим балансом и историей списаний авторизованного пользователя.
+//
+// Хендлер обрабатывает GET-запросы на маршруте /api/user/balance. Метод извлекает идентификатор
+// пользователя из контекста выполнения, запрашивает агрегированные данные из слоя бизнес-логики
+// и стримит их в сокет с помощью пулируемого Zero-Alloc хелпера WriteJSONOptimized.
+//
+// Возвращаемые HTTP-статусы:
+//   - 200 OK: Запрос успешно обработан, тело ответа содержит JSON со структурой баланса.
+//   - 401 Unauthorized: Пользователь не прошел проверку подлинности в AuthMiddleware.
+//   - 500 Internal Server Error: Произошел системный сбой при обращении к базе данных.
 func (h *UserHandler) GetBalance(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed) // 405
 		return
 	}
 
 	userID, ok := getUserIDFromContext(r.Context())
 	if !ok || userID == "" {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized) // 401
 		return
 	}
 
 	current, withdrawn, err := h.service.GetBalance(r.Context(), userID)
 	if err != nil {
 		h.logger.Error("Не удалось получить баланс пользователя", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError) // 500
 		return
 	}
 

@@ -22,7 +22,7 @@ func (h *UserHandler) GetWithdrawals(w http.ResponseWriter, r *http.Request) {
 	// 1. Извлекаем userID из контекста авторизации, установленного AuthMiddleware
 	userID, ok := getUserIDFromContext(r.Context())
 	if !ok || userID == "" {
-		http.Error(w, "Unauthorized user context missing", http.StatusUnauthorized) // 401
+		http.Error(w, "Unauthorized user context missing", http.StatusUnauthorized)
 		return
 	}
 
@@ -33,13 +33,13 @@ func (h *UserHandler) GetWithdrawals(w http.ResponseWriter, r *http.Request) {
 	withdrawals, err := h.service.GetWithdrawals(r.Context(), userID)
 	if err != nil {
 		ctxLogger.Error("Не удалось получить список списаний пользователя", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError) // 500
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	// 4. По спецификации: если записей нет, возвращаем строгий статус 204
+	// 4. По спецификации: если записей нет, возвращаем статус 204
 	if len(withdrawals) == 0 {
-		w.WriteHeader(http.StatusNoContent) // 204 No Content (без аллокаций памяти)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 

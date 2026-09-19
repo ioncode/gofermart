@@ -1,3 +1,13 @@
+// Пакет main является главной точкой входа в накопительную систему лояльности «Гофермарт».
+//
+// Файл выполняет глобальную инициализацию инфраструктурных компонентов приложения:
+//   - Парсинг и валидацию конфигурационных флагов и переменных окружения.
+//   - Настройку структурированного логирования на базе ulog и zerolog.
+//   - Проверку доступности СУБД PostgreSQL и автоматический запуск миграций.
+//   - Сборку слоев Чистой Архитектуры (Clean Architecture) через Dependency Injection.
+//   - Инициализацию фонового асинхронного воркера обработки начислений.
+//   - Конфигурирование сетевого периметра HTTP-сервера и роутера.
+//   - Реализацию потокобезопасного механизма деликатного завершения работы (Graceful Shutdown).
 package main
 
 import (
@@ -19,61 +29,58 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// main инициализирует и координирует жизненный цикл всего приложения.
 func main() {
-	// Переключаем маршалинг decimal в числовой формат для JSON (без кавычек)
+	// Настраиваем глобальное поведение сериализации библиотеки decimal.
+	// Флаг True заставляет кодировщик выводить копейки баллов как чистые числа в JSON,
+	// избавляя клиентские приложения от необходимости парсить строки в кавычках.
 	decimal.MarshalJSONWithoutQuotes = true
-	// 1. Настройка логгера ulog + zerolog
 
-	// локально используем консольный вывод красивых логов
-
+	// Инициализация слоя структурированного логирования для отслеживания инцидентов.
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        os.Stdout,
-		TimeFormat: time.RFC3339, // Красивый читаемый формат времени (например, 2026-09-11T16:15:00Z)
+		TimeFormat: time.RFC3339,
 	}
-	// на проде logWriter = os.Stdout
 	logWriter := consoleWriter
 	nativeZerolog := zerolog.New(logWriter).With().Timestamp().Caller().Logger()
 	logger := uzerolog.NewZerologAdapter(nativeZerolog)
 
+	// Загрузка конфигурационных параметров из флагов CLI и системного окружения (ENV).
 	cfg, err := config.Load()
 	if err != nil {
-		logger.Error("Критическая ошибка конфигурации", err)
+		logger.Error("Критическая ошибка конфигурации приложения", err)
 		os.Exit(1)
 	}
-
 	logger.Info("Конфигурация успешно загружена", ulog.String("addr", cfg.RunAddress))
 
-	// 2. Выполнение миграций базы данных до инициализации основного пула соединений.
-	// Если таблицы не созданы или СУБД недоступна, приложение упадет здесь.
+	// Запуск автоматического наката схем таблиц базы данных до открытия основного пула.
 	if err := postgres.RunMigrations(cfg.DatabaseURI); err != nil {
-		logger.Error("Критическая ошибка применения миграций", err)
+		logger.Error("Критическая ошибка применения SQL-миграций", err)
 		os.Exit(1)
-	} else {
-		logger.Info("Миграции успешно применены")
 	}
+	logger.Info("Миграции базы данных успешно применены")
 
-	// 3. Инициализация пула соединений с PostgreSQL.
-	// Контекст отменяется сразу после успешного (или неуспешного) подключения.
+	// Инициализация пула долгоживущих соединений к PostgreSQL с поддержкой Decimal.
 	poolCtx, poolCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	pool, err := postgres.NewPoolWithDecimal(poolCtx, cfg.DatabaseURI)
 	poolCancel()
 	if err != nil {
-		logger.Error("Не удалось подключиться к базе данных", err)
+		logger.Error("Не удалось инициализировать пул подключений к БД", err)
 		os.Exit(1)
-	} else {
-		logger.Info("Успешно подключились к БД")
 	}
-
-	// Дефер гарантирует закрытие пула соединений при завершении функции main().
+	logger.Info("Успешное подключение к СУБД PostgreSQL зафиксировано")
 	defer pool.Close()
 
-	// 4. Сборка слоев приложения согласно Чистой Архитектуре (Dependency Injection).
+	// Сборка репозиториев инфраструктурного слоя хранения данных.
 	userRepo := postgres.NewUserRepository(pool)
 	orderRepo := postgres.NewOrderRepository(pool)
 	balanceRepo := postgres.NewBalanceRepository(pool)
 	accrualRepo := postgres.NewOrderAccrualRepository(pool)
-	// Инициализируем фоновый воркер
+
+	// Инициализация и запуск фонового распределителя задач обработки заказов.
 	accrualWorker := worker.NewAccrualWorker(orderRepo, accrualRepo, cfg.AccrualSystemAddress, logger)
+
+	// Инициализация доменного сервисного слоя бизнес-логики приложения.
 	loyaltySvc := service.NewLoyaltyService(
 		userRepo,
 		orderRepo,
@@ -83,36 +90,38 @@ func main() {
 		logger,
 		accrualWorker.OrderChan,
 	)
+
+	// Инициализация хендлера и сборка сетевого роутера.
+	// Передаем userHandler, который удовлетворяет интерфейсу router.ServerHandler.
 	userHandler := handler.NewUserHandler(loyaltySvc, false, logger)
 	server := router.NewServer(cfg.RunAddress, userHandler, logger)
 
-	// 5. Старт HTTP-сервера в отдельной горутине, чтобы не блокировать основной поток.
+	// Асинхронный запуск прослушивания HTTP-порта в выделенной горутине.
 	go server.Start()
 
-	// 6. Реализация идиоматичного Graceful Shutdown с помощью NotifyContext.
-	// Слушаем сигналы завершения работы (Ctrl+C или остановка контейнера).
+	// Перехват системных сигналов операционной системы для организации плавного закрытия.
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 7. Запускаем воркер в фоне. Плановый тикер подстраховки настраиваем на 5 секунд.
+	// Запуск фонового планировщика подстраховки воркера с циклом опроса в 5 секунд.
 	go accrualWorker.Start(rootCtx, 5*time.Second)
 
-	// Блокируемся и ждем системного сигнала.
+	// Блокировка основного потока приложения до получения сигнала SIGTERM/SIGINT.
 	<-rootCtx.Done()
-	logger.Info("Получен сигнал завершения работы ОС. Начинаем плавную остановку сервера...")
+	logger.Info("Получен системный сигнал завершения. Запускается Graceful Shutdown...")
 
-	// 8. Закрываем канал для записи новых заказов (хендлеры перестанут слать новые события)
+	// Гарантированно закрываем канал передачи событий, останавливая входящий поток задач.
 	close(accrualWorker.OrderChan)
-	logger.Debug("Канал воркера успешно закрыт для записи")
+	logger.Debug("Входящий канал фонового воркера успешно заблокирован")
 
-	// 9. Ограничиваем время ожидания завершения текущих HTTP-запросов до 5 секунд.
+	// Деликатная остановка веб-сервера с жестким таймаутом ожидания активных запросов.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Stop(shutdownCtx); err != nil {
-		logger.Error("Ошибка при плавном завершении работы сервера", err)
+		logger.Error("Ошибка при деликатном завершении процессов сервера", err)
 		os.Exit(1)
 	}
 
-	logger.Info("Приложение успешно и безопасно остановлено.")
+	logger.Info("Все системные ресурсы освобождены. Приложение успешно остановлено.")
 }
