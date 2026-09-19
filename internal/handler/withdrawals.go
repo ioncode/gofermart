@@ -3,20 +3,33 @@ package handler
 import (
 	"net/http"
 
-	json "github.com/goccy/go-json"
 	"github.com/ioncode/ulog/v3"
 )
 
+// GetWithdrawals возвращает список успешных списаний баллов лояльности авторизованного пользователя.
+//
+// Хендлер привязан к маршруту: GET /api/user/withdrawals.
+// Метод извлекает ID пользователя из контекста, обращается к слою бизнес-логики и,
+// при наличии истории списаний, выполняет сериализацию данных через оптимизированный
+// дженерик-хелпер WriteJSONOptimized на базе sync.Pool.
+//
+// Возвращаемые HTTP-статусы:
+//   - 200 OK: Список успешно сформирован и передан в виде JSON-массива.
+//   - 204 No Content: У пользователя еще нет ни одного зафиксированного списания.
+//   - 401 Unauthorized: Пользователь не авторизован или токен сессии невалиден.
+//   - 500 Internal Server Error: Непредвиденный сбой базы данных или сервиса.
 func (h *UserHandler) GetWithdrawals(w http.ResponseWriter, r *http.Request) {
+	// 1. Извлекаем userID из контекста авторизации, установленного AuthMiddleware
 	userID, ok := getUserIDFromContext(r.Context())
 	if !ok || userID == "" {
 		http.Error(w, "Unauthorized user context missing", http.StatusUnauthorized) // 401
 		return
 	}
 
-	// Создаем контекстный логгер, привязанный к текущему пользователю
+	// 2. Создаем контекстный логгер, обогащенный идентификатором пользователя
 	ctxLogger := h.logger.With(ulog.String("user_id", userID))
 
+	// 3. Получаем историю списаний из транзакционного слоя бизнес-логики сервиса
 	withdrawals, err := h.service.GetWithdrawals(r.Context(), userID)
 	if err != nil {
 		ctxLogger.Error("Не удалось получить список списаний пользователя", err)
@@ -24,21 +37,12 @@ func (h *UserHandler) GetWithdrawals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 4. По спецификации: если записей нет, возвращаем строгий статус 204
 	if len(withdrawals) == 0 {
-		w.WriteHeader(http.StatusNoContent) // 204
+		w.WriteHeader(http.StatusNoContent) // 204 No Content (без аллокаций памяти)
 		return
 	}
 
-	bodyBytes, err := json.Marshal(withdrawals)
-	if err != nil {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusInternalServerError) // 500
-		_, _ = w.Write([]byte("Internal Server Error: failed to encode response"))
-		ctxLogger.Error("Ошибка маршалинга списка списаний в JSON", err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK) // 200
-	_, _ = w.Write(bodyBytes)
+	// 5. Стримим JSON-массив списаний напрямую в TCP-сокет через пул буферов
+	WriteJSONOptimized(w, http.StatusOK, withdrawals)
 }
