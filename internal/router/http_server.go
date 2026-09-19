@@ -13,13 +13,19 @@ import (
 	"github.com/ioncode/ulog/v3"
 )
 
+// Server инкапсулирует конфигурацию и управление жизненным циклом HTTP-сервера.
 type Server struct {
 	httpServer *http.Server
 	logger     ulog.Logger
 }
 
-// NewServer собирает http.Server, подключает middleware и настраивает маршруты
-func NewServer(addr string, userHandler *handler.UserHandler, logger ulog.Logger) *Server {
+// NewServer создает и настраивает новый экземпляр HTTP-сервера.
+//
+// В качестве обработчика бизнес-логики принимает ServerHandler, который с помощью
+// композиции объединяет контракты аутентификации, управления заказами и финансов.
+// Метод инициализирует chi.Router, подключает базовые и кастомные Middleware,
+// а также разворачивает дерево эндпоинтов системы лояльности.
+func NewServer(addr string, srvHandler ServerHandler, logger ulog.Logger) *Server {
 	logger = logger.With(ulog.String("component", "HTTP server"))
 	r := chi.NewRouter()
 
@@ -29,26 +35,26 @@ func NewServer(addr string, userHandler *handler.UserHandler, logger ulog.Logger
 	r.Use(ulog.LoggingMiddleware(logger))
 	r.Use(middleware.Timeout(60 * time.Second))
 
-	// DoS для чтения через helper
+	// DoS-защита для чтения через helper
 	r.Use(MaxBytesMiddleware(handler.MaxBodySize))
 
 	// Группировка эндпоинтов согласно ТЗ накопительной системы
 	r.Route("/api/user", func(r chi.Router) {
 		// Публичные эндпоинты (Аутентификация и регистрация)
-		r.With(middleware.AllowContentType("application/json")).Post("/register", userHandler.Register)
-		r.With(middleware.AllowContentType("application/json")).Post("/login", userHandler.Login)
+		r.With(middleware.AllowContentType("application/json")).Post("/register", srvHandler.Register)
+		r.With(middleware.AllowContentType("application/json")).Post("/login", srvHandler.Login)
 
 		// Защищенные эндпоинты (доступны только авторизованным пользователям)
 		r.Group(func(r chi.Router) {
-			r.Use(userHandler.AuthMiddleware)
+			r.Use(srvHandler.AuthMiddleware)
 
-			r.With(middleware.AllowContentType("text/plain")).Post("/orders", userHandler.UploadOrder)
-			r.Get("/orders", userHandler.GetOrders)
+			r.With(middleware.AllowContentType("text/plain")).Post("/orders", srvHandler.UploadOrder)
+			r.Get("/orders", srvHandler.GetOrders)
 
-			r.Get("/balance", userHandler.GetBalance)
-			r.With(middleware.AllowContentType("application/json")).Post("/balance/withdraw", userHandler.Withdraw)
+			r.Get("/balance", srvHandler.GetBalance)
+			r.With(middleware.AllowContentType("application/json")).Post("/balance/withdraw", srvHandler.Withdraw)
 
-			r.Get("/withdrawals", userHandler.GetWithdrawals)
+			r.Get("/withdrawals", srvHandler.GetWithdrawals)
 		})
 	})
 
@@ -89,4 +95,9 @@ func MaxBytesMiddleware(maxSize int64) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// GetHandler возвращает настроенный роутер (http.Handler) для использования в интеграционных тестах.
+func (s *Server) GetHandler() http.Handler {
+	return s.httpServer.Handler
 }
