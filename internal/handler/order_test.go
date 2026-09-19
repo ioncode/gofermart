@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -295,4 +296,75 @@ func TestUserHandler_GetOrders_Concurrency(t *testing.T) {
 
 	// Ожидаем завершения работы всех горутин
 	wg.Wait()
+}
+
+// BenchmarkUserHandler_GetOrders_WithData измеряет скорость формирования и отправки
+// JSON-ответа, содержащего заполненный массив заказов пользователя.
+func BenchmarkUserHandler_GetOrders_WithData(b *testing.B) {
+	// Настраиваем логгер на запись в io.Discard, чтобы исключить задержки ввода-вывода
+	logger := uzerolog.NewZerologAdapter(zerolog.New(io.Discard))
+
+	// Используем легкий стаб loyaltyServiceStub, объявленный в login_test.go
+	stubSvc := &loyaltyServiceStub{}
+	h := NewUserHandler(stubSvc, false, logger)
+
+	// Задаем тестовый ID пользователя (метод GetOrders стаба вернет для него 2 заказа)
+	userID := "perf_user_with_data"
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		// Останавливаем таймер на время подготовки HTTP-окружения,
+		// чтобы не учитывать накладные расходы самого пакета httptest
+		b.StopTimer()
+
+		// Создаем контекст и записываем в него userIDContextKey (или боевой domain.UserIDContextKey)
+		ctx := context.WithValue(context.Background(), userIDContextKey, userID)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/api/user/orders", nil)
+		if err != nil {
+			b.Fatalf("failed to create request: %v", err)
+		}
+
+		rec := httptest.NewRecorder()
+		b.StartTimer()
+
+		// Тестируем чистую скорость работы хендлера при сериализации и отдаче данных
+		h.GetOrders(rec, req)
+	}
+}
+
+// BenchmarkUserHandler_GetOrders_Empty измеряет скорость работы хендлера
+// при сценарии, когда у пользователя нет зарегистрированных заказов.
+// Бенчмарк проверяет чистую скорость формирования ответа 204 No Content.
+func BenchmarkUserHandler_GetOrders_Empty(b *testing.B) {
+	// Настраиваем логгер на запись в io.Discard, чтобы исключить задержки ввода-вывода
+	logger := uzerolog.NewZerologAdapter(zerolog.New(io.Discard))
+
+	// Используем легкий стаб loyaltyServiceStub, объявленный в login_test.go
+	stubSvc := &loyaltyServiceStub{}
+	h := NewUserHandler(stubSvc, false, logger)
+
+	// Задаем специальный маркер "perf_empty".
+	// Обновленный метод GetOrders стаба вернет для него пустой слайс ([]domain.Order{}).
+	userID := "perf_empty"
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		// Останавливаем таймер на время подготовки HTTP-окружения,
+		// чтобы не учитывать накладные расходы самого пакета httptest
+		b.StopTimer()
+
+		ctx := context.WithValue(context.Background(), userIDContextKey, userID)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/api/user/orders", nil)
+		if err != nil {
+			b.Fatalf("failed to create request: %v", err)
+		}
+
+		rec := httptest.NewRecorder()
+		b.StartTimer()
+
+		// Тестируем чистую скорость работы хендлера при обработке пустого списка
+		h.GetOrders(rec, req)
+	}
 }

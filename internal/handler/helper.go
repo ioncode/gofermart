@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net/http"
@@ -87,4 +88,53 @@ func ReadJSONOptimized[T any](w http.ResponseWriter, r *http.Request, dst *T) bo
 		}
 		return true
 	})
+}
+
+// jsonPool управляет высокопроизводительными, переиспользуемыми буферами памяти
+// для сериализации исходящих HTTP-ответов в формате JSON.
+var jsonPool = sync.Pool{
+	New: func() any {
+		// new(bytes.Buffer) возвращает чистый указатель *bytes.Buffer.
+		// Это классический, читаемый и безопасный подход для Go-приложений.
+		return new(bytes.Buffer)
+	},
+}
+
+// WriteJSONOptimized выполняет потоковую сериализацию данных в JSON без лишних аллокаций в хендлере.
+func WriteJSONOptimized[T any](w http.ResponseWriter, statusCode int, data T) {
+	// Извлекаем понятный и привычный *bytes.Buffer
+	buf := jsonPool.Get().(*bytes.Buffer)
+	defer func() {
+		buf.Reset() // Сбрасываем длину буфера в 0, сохраняя выделенную емкость (capacity)
+		jsonPool.Put(buf)
+	}()
+
+	// Инициализируем потоковый кодировщик напрямую в буфер
+	if err := json.NewEncoder(buf).Encode(data); err != nil {
+		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
+		return
+	}
+
+	// Выставляем REST API заголовки и отправляем данные в сокет
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	_, _ = buf.WriteTo(w)
+}
+
+// WriteJSONWithMarshalling выполняет стандартную сериализацию данных через json.Marshal.
+// Метод выделяет память в куче под итоговый срез байт на каждый запрос и передает его в сокет.
+// Используется для сравнительного анализа производительности в бенчмарках.
+func WriteJSONWithMarshalling[T any](w http.ResponseWriter, statusCode int, data T) {
+	// json.Marshal вынужден аллоцировать новый кусок памяти в куче под итоговый JSON
+	bytes, err := json.Marshal(data)
+	if err != nil {
+		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+
+	// Передаем выделенный срез байт в сетевой интерфейс
+	_, _ = w.Write(bytes)
 }

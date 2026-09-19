@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 
 	"io"
 	"net/http"
@@ -263,5 +264,37 @@ func BenchmarkStage2_Unmarshal(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		// Замеряем только то, что делает внешняя библиотека
 		_ = json.Unmarshal(payload, &dst)
+	}
+}
+
+// BenchmarkStage3_WriteJSON_Optimized замеряет чистую скорость работы пула и NewEncoder.
+func BenchmarkStage3_WriteJSON_Optimized(b *testing.B) {
+	stubSvc := &loyaltyServiceStub{}
+	orders, _ := stubSvc.GetOrders(context.Background(), "perf_user")
+
+	// Используем специальный рекордер-пустышку, который не аллоцирует память под заголовки
+	rec := httptest.NewRecorder()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		WriteJSONOptimized(rec, http.StatusOK, orders)
+
+		// Очищаем буфер рекордера, чтобы он не раздувался во время теста
+		rec.Body.Reset()
+	}
+}
+
+// BenchmarkStage3_WriteJSON_Marshalling замеряет скорость стандартного json.Marshal.
+func BenchmarkStage3_WriteJSON_Marshalling(b *testing.B) {
+	stubSvc := &loyaltyServiceStub{}
+	orders, _ := stubSvc.GetOrders(context.Background(), "perf_user")
+
+	rec := httptest.NewRecorder()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		WriteJSONWithMarshalling(rec, http.StatusOK, orders)
+
+		rec.Body.Reset()
 	}
 }

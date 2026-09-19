@@ -9,39 +9,38 @@ import (
 	"github.com/ioncode/gofermart/internal/service"
 )
 
-// Login обрабатывает запрос POST /api/user/login
+// Login обрабатывает входящий HTTP-запрос POST /api/user/login на аутентификацию пользователя.
+// Метод использует пул объектов registerRequestPool для исключения утечек в кучу и возвращает стандартные HTTP-статусы (200, 400, 401, 500).
 func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
-	var req RegisterRequest
+	req := registerRequestPool.Get().(*RegisterRequest)
+	defer func() {
+		req.Reset()
+		registerRequestPool.Put(req)
+	}()
 
-	// Читаем и парсим JSON через наш пуленный хелпер со скоростью ~85 ns.
-	// Если формат неверный (400) или тело > 4 КБ (413) — хелпер сам ответит и вернет false.
-	if !ReadJSONOptimized(w, r, &req) {
+	if !ReadJSONOptimized(w, r, req) {
+		h.logger.Debug("Ошибка чтения тела запроса на регистрацию")
 		return
 	}
 
-	// Валидация данных: очищаем пробелы с обеих сторон строк
 	req.Login = strings.TrimSpace(req.Login)
 	req.Password = strings.TrimSpace(req.Password)
-
 	if req.Login == "" || req.Password == "" {
-		http.Error(w, "Login and password are required", http.StatusBadRequest) // 400
+		http.Error(w, "Login and password are required", http.StatusBadRequest)
 		return
 	}
 
-	// 4. Передаем строго типизированные string аргументы в слой сервиса
 	token, err := h.service.Authenticate(r.Context(), req.Login, req.Password)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) {
-			// 401 — неверная пара логин/пароль
 			http.Error(w, "Invalid login or password", http.StatusUnauthorized)
 			return
 		}
-		// 500 — внутренняя ошибка сервера (база данных недоступна, сбой сети и т.д.)
+		h.logger.Error("Authentication processing failed", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	// 5. Установка JWT-токена в cookies (в соответствии с ТЗ)
 	ttl := h.service.TokenTTL()
 	http.SetCookie(w, &http.Cookie{
 		Name:     "auth_token",
@@ -49,11 +48,10 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		Expires:  time.Now().Add(ttl),
 		MaxAge:   int(ttl.Seconds()),
-		HttpOnly: true,                 // Защита от кражи токена скриптами через XSS-атаки
-		Secure:   h.isProd,             // Включаем только для HTTPS сред
-		SameSite: http.SameSiteLaxMode, // Базовая защита от CSRF-атак
+		HttpOnly: true,
+		Secure:   h.isProd,
+		SameSite: http.SameSiteLaxMode,
 	})
 
-	// 200 — пользователь успешно аутентифицирован
 	w.WriteHeader(http.StatusOK)
 }
