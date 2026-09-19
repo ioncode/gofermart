@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -108,4 +109,57 @@ func TestUserHandler_GetBalance(t *testing.T) {
 
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	})
+}
+
+// BenchmarkUserHandler_GetBalance_Success измеряет скорость выполнения хендлера баланса
+// в изоляции от СУБД, отсекая накладные расходы httptest.NewRequest с помощью таймера.
+func BenchmarkUserHandler_GetBalance_Success(b *testing.B) {
+	// Настраиваем логгер ulog на запись в никуда, чтобы исключить задержки дискового ввода-вывода
+	logger := uzerolog.NewZerologAdapter(zerolog.New(io.Discard))
+
+	// Переиспользуем наш легковесный стаб loyaltyServiceStub из login_test.go
+	stubSvc := &loyaltyServiceStub{}
+	h := NewUserHandler(stubSvc, false, logger)
+
+	userID := "perf_balance_user"
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		// Останавливаем счетчик времени бенчмарка на этапе сборки HTTP-окружения
+		b.StopTimer()
+
+		// Оборачиваем userIDContextKey (или domain.UserIDContextKey в зависимости от вашего кода)
+		ctx := context.WithValue(context.Background(), userIDContextKey, userID)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/api/user/balance", nil)
+		if err != nil {
+			b.Fatalf("failed to create request: %v", err)
+		}
+
+		rec := httptest.NewRecorder()
+		b.StartTimer()
+
+		// Тестируем чистый вызов метода хендлера GetBalance
+		h.GetBalance(rec, req)
+	}
+}
+
+// BenchmarkStage4_WriteBalance_Optimized замеряет чистую скорость
+// работы оптимизированного пула буферов при выдаче баланса.
+func BenchmarkStage4_WriteBalance_Optimized(b *testing.B) {
+	logger := uzerolog.NewZerologAdapter(zerolog.New(io.Discard))
+	stubSvc := &loyaltyServiceStub{}
+	h := NewUserHandler(stubSvc, false, logger)
+
+	ctx := context.WithValue(context.Background(), userIDContextKey, "perf_balance_user")
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/api/user/balance", nil)
+	rec := httptest.NewRecorder()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Вызываем наш обновленный метод хендлера, использующий WriteJSONOptimized
+		h.GetBalance(rec, req)
+
+		rec.Body.Reset()
+	}
 }
