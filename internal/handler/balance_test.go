@@ -129,7 +129,7 @@ func BenchmarkUserHandler_GetBalance_Success(b *testing.B) {
 		// Останавливаем счетчик времени бенчмарка на этапе сборки HTTP-окружения
 		b.StopTimer()
 
-		// Оборачиваем userIDContextKey (или domain.UserIDContextKey в зависимости от вашего кода)
+		// Оборачиваем userIDContextKey
 		ctx := context.WithValue(context.Background(), userIDContextKey, userID)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/api/user/balance", nil)
 		if err != nil {

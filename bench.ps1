@@ -32,7 +32,7 @@ $CurrentFile = Join-Path $BenchDir $FileName
 
 # 4. Запуск бенчмарков
 Write-Host "`n[*] Запускаю бенчмарки пакета handler (10 итераций для надежной статистики)..." -ForegroundColor Yellow
-# Запускаем тесты, содержащие Stage3 (ваши бенчмарки хелпера записи)
+# Запускаем тесты, содержащие Stage
 go test -bench=Stage -benchmem -count=10 ./internal/handler | Out-File -FilePath $CurrentFile -Encoding utf8
 
 Write-Host "[+] Результаты успешно сохранены в: .\benchmarks\$FileName" -ForegroundColor Green
