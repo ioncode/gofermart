@@ -4,19 +4,7 @@ package handler
 
 import (
 	"net/http"
-
-	"github.com/shopspring/decimal"
 )
-
-// balanceDTO описывает транспортную структуру ответа API для отображения баланса.
-// Используется в слое хендлеров для изоляции доменных моделей от деталей сериализации JSON.
-type balanceDTO struct {
-	// Current хранит текущую сумму доступных баллов лояльности на счету пользователя .
-	Current decimal.Decimal `json:"current"`
-
-	// Withdrawn хранит общую сумму баллов лояльности, списанных за всё время.
-	Withdrawn decimal.Decimal `json:"withdrawn"`
-}
 
 // GetBalance возвращает JSON-ответ с текущим балансом и историей списаний авторизованного пользователя.
 //

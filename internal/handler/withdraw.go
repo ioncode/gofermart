@@ -3,45 +3,11 @@ package handler
 import (
 	"errors"
 	"net/http"
-	"strings"
-	"sync"
 
 	"github.com/ioncode/gofermart/internal/repository"
 	"github.com/ioncode/gofermart/internal/service"
 	"github.com/ioncode/ulog/v3"
-	"github.com/shopspring/decimal"
 )
-
-// WithdrawRequest описывает структуру входящего JSON-пакета
-// для совершения финансовой операции списания бонусных баллов.
-type WithdrawRequest struct {
-	Order string          `json:"order"` // Номер заказа, в счет которого списываются баллы
-	Sum   decimal.Decimal `json:"sum"`   // Сумма списываемых баллов
-}
-
-// Reset выполняет сброс всех полей структуры WithdrawRequest до их нулевых значений.
-//
-// Метод необходим для очистки объекта перед его возвращением в [withdrawRequestPool],
-// что гарантирует отсутствие загрязнения данных (Data Contamination) и исключает
-// протекание финансовых сумм между параллельными HTTP-запросами разных горутину.
-func (r *WithdrawRequest) Reset() {
-	r.Order = ""
-	r.Sum = decimal.Zero
-}
-
-// withdrawRequestPool представляет собой потокобезопасный пул объектов [sync.Pool]
-// для переиспользования памяти, выделенной под структуры [WithdrawRequest].
-//
-// Архитектурное назначение:
-//   - Позволяет зафиксировать объекты в памяти и минимизировать количество аллокаций
-//     в куче (heap) при частых финансовых запросах на списание баллов.
-//   - Защищает сборщик мусора (GC) от дополнительной нагрузки на высоконагруженных эндпоинтах.
-var withdrawRequestPool = sync.Pool{
-	New: func() any {
-		// Выделяем память под структуру один раз при инициализации элемента пула
-		return new(WithdrawRequest)
-	},
-}
 
 // Withdraw обрабатывает HTTP-запрос POST /api/user/balance/withdraw на списание баллов.
 //
@@ -84,8 +50,7 @@ func (h *UserHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.Order = strings.TrimSpace(req.Order)
-	if req.Order == "" || req.Sum.IsNegative() || req.Sum.IsZero() {
+	if !req.Validate() {
 		http.Error(w, "Invalid request payload", http.StatusBadRequest) // 400
 		return
 	}

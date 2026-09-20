@@ -3,7 +3,6 @@ package handler
 import (
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/ioncode/gofermart/internal/service"
@@ -19,13 +18,11 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if !ReadJSONOptimized(w, r, req) {
-		h.logger.Debug("Ошибка чтения тела запроса на регистрацию")
+		h.logger.Debug("Ошибка чтения тела запроса на вход в систему")
 		return
 	}
 
-	req.Login = strings.TrimSpace(req.Login)
-	req.Password = strings.TrimSpace(req.Password)
-	if req.Login == "" || req.Password == "" {
+	if !req.Validate() {
 		http.Error(w, "Login and password are required", http.StatusBadRequest)
 		return
 	}

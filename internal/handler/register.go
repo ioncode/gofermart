@@ -3,36 +3,11 @@ package handler
 import (
 	"errors"
 	"net/http"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/ioncode/gofermart/internal/service"
 	"github.com/ioncode/ulog/v3"
 )
-
-// RegisterRequest представляет DTO входящего запроса регистрации
-type RegisterRequest struct {
-	Login    string `json:"login"`
-	Password string `json:"password"`
-}
-
-// registerRequestPool хранит указатели на структуры RegisterRequest.
-// Использование указателей (*RegisterRequest) в sync.Pool гарантирует,
-// что рантайм Go не будет упаковывать структуру в интерфейс any,
-// полностью исключая escape to heap (выделение памяти в куче) на каждый запрос.
-var registerRequestPool = sync.Pool{
-	New: func() any {
-		return new(RegisterRequest)
-	},
-}
-
-// Reset полностью очищает поля структуры, подготавливая её к повторному использованию.
-// Операция присваивания пустой структуры оптимизируется компилятором Go
-// и выполняется на уровне регистров процессора абсолютно без аллокаций в куче.
-func (r *RegisterRequest) Reset() {
-	*r = RegisterRequest{}
-}
 
 // Register обрабатывает входящий HTTP-запрос на регистрацию нового пользователя.
 //
@@ -56,20 +31,20 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Выполняем десериализацию JSON без аллокаций памяти в куче
 	if !ReadJSONOptimized(w, r, req) {
+		h.logger.Debug("Не удалось прочитать тело запроса на регистрацию")
 		return // Ошибки формата и заголовков обрабатываются внутри ReadJSONOptimized
 	}
 
-	// 3. Нормализация строк и базовая валидация входных данных
-	req.Login = strings.TrimSpace(req.Login)
-	req.Password = strings.TrimSpace(req.Password)
-	if req.Login == "" || req.Password == "" {
+	// 3. Инкапсулированная валидация и ленивая нормализация данных (0 аллокаций в 95% случаев)
+	if !req.Validate() {
 		http.Error(w, "Login and password are required", http.StatusBadRequest) // 400
 		return
 	}
 
+	// 4. Обогащаем логгер контекстом (0 аллокаций благодаря zero-alloc движку пакета ulog)
 	userLogger := h.logger.With(ulog.String("login", req.Login))
 
-	// 4. Передаем выполнение в транзакционный слой бизнес-логики сервиса
+	// 5. Передаем выполнение в транзакционный слой бизнес-логики сервиса
 	token, err := h.service.Register(r.Context(), req.Login, req.Password)
 	if err != nil {
 		// Перехватываем нарушение уникальности логина на уровне БД
