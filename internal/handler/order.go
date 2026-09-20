@@ -70,5 +70,5 @@ func (h *UserHandler) GetOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSONOptimized(w, http.StatusOK, orders)
+	WriteJSONOptimized(w, http.StatusOK, &orders)
 }

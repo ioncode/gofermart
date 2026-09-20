@@ -52,5 +52,5 @@ func (h *UserHandler) GetBalance(w http.ResponseWriter, r *http.Request) {
 		Withdrawn: withdrawn,
 	}
 
-	WriteJSONOptimized(w, http.StatusOK, response)
+	WriteJSONOptimized(w, http.StatusOK, &response)
 }

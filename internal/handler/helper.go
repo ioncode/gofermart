@@ -106,7 +106,7 @@ var jsonPool = sync.Pool{
 }
 
 // WriteJSONOptimized выполняет потоковую сериализацию данных в JSON без лишних аллокаций в хендлере.
-func WriteJSONOptimized[T any](w http.ResponseWriter, statusCode int, data T) {
+func WriteJSONOptimized[T any](w http.ResponseWriter, statusCode int, data *T) {
 	// Извлекаем понятный и привычный *bytes.Buffer
 	buf := jsonPool.Get().(*bytes.Buffer)
 	defer func() {

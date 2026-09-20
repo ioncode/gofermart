@@ -44,5 +44,5 @@ func (h *UserHandler) GetWithdrawals(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. Стримим JSON-массив списаний напрямую в TCP-сокет через пул буферов
-	WriteJSONOptimized(w, http.StatusOK, withdrawals)
+	WriteJSONOptimized(w, http.StatusOK, &withdrawals)
 }

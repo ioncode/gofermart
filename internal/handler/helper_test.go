@@ -277,7 +277,7 @@ func BenchmarkStage3_WriteJSON_Optimized(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		WriteJSONOptimized(rec, http.StatusOK, orders)
+		WriteJSONOptimized(rec, http.StatusOK, &orders)
 
 		// Очищаем буфер рекордера, чтобы он не раздувался во время теста
 		rec.Body.Reset()
