@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
@@ -22,6 +23,39 @@ var migrationsFS embed.FS
 
 // RunMigrations запускает миграции базы данных перед стартом основных сервисов
 func RunMigrations(databaseURL string) error {
+	// =========================================================================
+	// 1. ВРЕМЕННОЕ ПОДКЛЮЧЕНИЕ ДЛЯ ПРОВЕРКИ РЕКОМЕНДАТЕЛЬНОГО ЗАМКА
+	// =========================================================================
+	db, err := sql.Open("postgres", databaseURL)
+	if err != nil {
+		return fmt.Errorf("failed to open tech connection for lock check: %w", err)
+	}
+	defer db.Close()
+
+	// Выполняем неблокирующую попытку захвата замка с ID 42 на уровне СУБД.
+	// Метод мгновенно возвращает true (свободен/захвачен) или false (занят другим подом).
+	var acquired bool
+	err = db.QueryRow(`SELECT pg_try_advisory_lock(1777)`).Scan(&acquired)
+	if err != nil {
+		return fmt.Errorf("failed to check postgres advisory lock: %w", err)
+	}
+
+	// Если замок занят, значит, параллельный под УЖЕ накатывает миграции в этот миг.
+	// Этот под просто пропускает шаг и выходит с успехом, чтобы main.go сразу запускал HTTP-сервер.
+	if !acquired {
+		// Опционально: делаем микро-паузу, чтобы ведущий под успел физически
+		// завершить DDL-запросы до того, как мы начнем отвечать клиентам по API.
+		time.Sleep(1 * time.Second)
+		return nil
+	}
+
+	// Гарантированно освобождаем замок на уровне сессии PostgreSQL,
+	// как только текущий (ведущий) под завершит функцию RunMigrations.
+	defer func() {
+		_, _ = db.Exec(`SELECT pg_advisory_unlock(1777)`)
+	}()
+	// =========================================================================
+
 	// Создаем источник данных для golang-migrate из встроенных файлов embed.FS
 	sourceDriver, err := httpfs.New(http.FS(migrationsFS), "migrations")
 	if err != nil {
