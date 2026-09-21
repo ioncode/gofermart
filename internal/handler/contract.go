@@ -32,6 +32,7 @@ func (r *RegisterRequest) Reset() {
 
 // Sanitize выполняет «ленивую» обрезку пробелов у полей.
 // Выделяет память под новые строки в куче ТОЛЬКО если пробелы реально есть.
+// Логин приводится к нижнему регистру.
 func (r *RegisterRequest) Sanitize() {
 	if strings.HasPrefix(r.Login, " ") || strings.HasSuffix(r.Login, " ") {
 		r.Login = strings.TrimSpace(r.Login)
@@ -39,6 +40,8 @@ func (r *RegisterRequest) Sanitize() {
 	if strings.HasPrefix(r.Password, " ") || strings.HasSuffix(r.Password, " ") {
 		r.Password = strings.TrimSpace(r.Password)
 	}
+
+	r.Login = strings.ToLower(r.Login)
 }
 
 // Validate запускает ленивую очистку данных и проверяет обязательные поля на пустоту.
