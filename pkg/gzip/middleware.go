@@ -1,7 +1,6 @@
 package gzip
 
 import (
-	"log"
 	"net/http"
 	"strings"
 )
@@ -23,7 +22,6 @@ func Middleware(next http.Handler) http.Handler {
 
 		// Упаковываем, если клиент поддерживает сжатие gzip
 		acceptEncoding := r.Header.Get("Accept-Encoding")
-		log.Println(acceptEncoding)
 		if strings.Contains(acceptEncoding, "gzip") {
 			cw := NewCompressWriter(w)
 

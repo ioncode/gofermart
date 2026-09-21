@@ -110,18 +110,20 @@ func main() {
 	<-rootCtx.Done()
 	logger.Info("Получен системный сигнал завершения. Запускается Graceful Shutdown...")
 
-	// Гарантированно закрываем канал передачи событий, останавливая входящий поток задач.
-	close(accrualWorker.OrderChan)
-	logger.Debug("Входящий канал фонового воркера успешно заблокирован")
-
 	// Деликатная остановка веб-сервера с жестким таймаутом ожидания активных запросов.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Stop(shutdownCtx); err != nil {
-		logger.Error("Ошибка при деликатном завершении процессов сервера", err)
+		logger.Error("Ошибка при остановке HTTP-сервера", err)
 		os.Exit(1)
 	}
+
+	logger.Info("HTTP-сервер успешно остановлен. Новые запросы больше не поступают.")
+
+	// Гарантированно закрываем канал передачи событий, останавливая входящий поток задач.
+	close(accrualWorker.OrderChan)
+	logger.Debug("Входящий канал фонового воркера успешно заблокирован")
 
 	logger.Info("Все системные ресурсы освобождены. Приложение успешно остановлено.")
 }
