@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ioncode/gofermart/internal/repository"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 )
@@ -19,6 +20,7 @@ func NewOrderAccrualRepository(db *pgxpool.Pool) *OrderAccrualRepository {
 }
 
 // UpdateOrderAccrual переводит заказ в новый статус и начисляет баллы лояльности в рамках ACID-транзакции.
+// для предотвращения взаимных блокировок с транзакцией списания порядок блокировки users -> orders
 func (r *OrderAccrualRepository) UpdateOrderAndBalance(ctx context.Context, orderID string, userID string, status string, accrual decimal.Decimal) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -26,26 +28,30 @@ func (r *OrderAccrualRepository) UpdateOrderAndBalance(ctx context.Context, orde
 	}
 	defer tx.Rollback(ctx)
 
-	// 1. Обновляем статус и сумму начисления в таблице заказов
-	orderQuery := `UPDATE orders SET status = $1, accrual = $2 WHERE id = $3`
-	_, err = tx.Exec(ctx, orderQuery, status, accrual, orderID)
+	if accrual.IsPositive() {
+		userQuery := `UPDATE users SET balance = balance + $1 WHERE id = $2`
+		res, err := tx.Exec(ctx, userQuery, accrual, userID)
+		if err != nil {
+			return fmt.Errorf("postgres: tx update user balance failed: %w", err)
+		}
+
+		if res.RowsAffected() == 0 {
+			return fmt.Errorf("postgres: user %s not found: %w", userID, repository.ErrUserNotFound)
+		}
+	}
+
+	orderQuery := `UPDATE orders SET status = $1, accrual = $2 WHERE id = $3 AND user_id = $4`
+	res, err := tx.Exec(ctx, orderQuery, status, accrual, orderID, userID)
 	if err != nil {
 		return fmt.Errorf("postgres: tx update order failed: %w", err)
 	}
 
-	// 2. Начисляем баллы пользователю при положительной сумме
-	if accrual.IsPositive() {
-		userQuery := `UPDATE users SET balance = balance + $1 WHERE id = $2`
-		_, err = tx.Exec(ctx, userQuery, accrual, userID)
-		if err != nil {
-			return fmt.Errorf("postgres: tx update user balance failed: %w", err)
-		}
+	if res.RowsAffected() == 0 {
+		return fmt.Errorf("postgres: order %s for user %s not found: %w", orderID, userID, repository.ErrOrderNotFound)
 	}
 
-	// 3. Фиксируем транзакцию
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("postgres: tx commit failed: %w", err)
 	}
-
 	return nil
 }
