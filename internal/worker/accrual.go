@@ -195,7 +195,10 @@ func (w *AccrualWorker) checkOrderAccrual(ctx context.Context, order domain.Orde
 	if err != nil {
 		return 0, fmt.Errorf("http request to accrual failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body) // Вычитываем остатки в пустоту для гарантированного возвращения соединения в пул Keep-Alive
+		resp.Body.Close()
+	}()
 
 	// ТЗ требует обязательной обработки статуса 429 Too Many Requests (Rate Limiting внешнего сервиса)
 	if resp.StatusCode == http.StatusTooManyRequests {
