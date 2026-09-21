@@ -37,16 +37,18 @@ func (c *CompressWriter) Write(p []byte) (int, error) {
 		c.wroteHeader = true
 	}
 
-	n, err := c.zw.Write(p)
-	if err != nil {
-		return n, err
-	}
+	// n, err := c.zw.Write(p)
+	// if err != nil {
+	// 	return n, err
+	// }
 
-	if f, ok := c.w.(http.Flusher); ok {
-		f.Flush()
-	}
+	// if f, ok := c.w.(http.Flusher); ok {
+	// 	f.Flush()
+	// }
 
-	return n, nil
+	// return n, nil
+
+	return c.zw.Write(p)
 }
 
 // WriteHeader блокирует выставление Content-Encoding для пустых статус-кодов.
