@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -48,6 +49,11 @@ func NewPoolWithDecimal(ctx context.Context, databaseURI string) (*pgxpool.Pool,
 	if err != nil {
 		return nil, fmt.Errorf("postgres: failed to parse database uri config: %w", err)
 	}
+
+	config.MaxConns = 50                      // Максимальное количество одновременных активных соединений с СУБД
+	config.MinConns = 10                      // Минимальное число удерживаемых «горячих» коннектов в пуле (убирает задержки на старте)
+	config.MaxConnIdleTime = 15 * time.Minute // Время жизни неиспользуемого соединения перед его деликатным закрытием
+	config.MaxConnLifetime = 1 * time.Hour    // Абсолютное время жизни коннекта для предотвращения утечек памяти на стороне Postgres
 
 	// Настраиваем триггер, который срабатывает при каждом новом физическом подключении к БД
 	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
