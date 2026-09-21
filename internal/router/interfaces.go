@@ -24,7 +24,7 @@ type FinanceManager interface {
 
 // ServerHandler объединяет все три контекста с помощью композиции интерфейсов.
 //go:generate mockery
-//mockery:geterate: true
+//mockery:generate: true
 type ServerHandler interface {
 	Authenticator
 	OrderManager
