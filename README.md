@@ -30,21 +30,29 @@
 
 ## 🧪 Стратегия тестирования
 
-Проект защищен двухуровневой системой автоматизированного контроля качества:
-1. **Unit-тестирование (Слой Handlers & Services):** HTTP-контроллеры и бизнес-кейсы покрыты изолированными тестами с автоматической генерацией мок-интерфейсов пакетами `mockgen` и `mockery`. Примеры реализации: [internal/handler/balance_test.go](./internal/handler/balance_test.go) и [internal/handler/order_test.go](./internal/handler/order_test.go).
-2. **Интеграционное тестирование (Слой Postgres DAL):** Критические финансовые операции и стейт-машина заказов покрыты интеграционными тестами в пакете `internal/repository/postgres/`. 
+Проект защищен развитой многоуровневой системой автоматизированного контроля качества, исключающей регрессии при рефакторинге кодовой базы:
 
-Интеграционные тесты объединены в продвинутые тестовые сьюты (`testify/suite`) и запускаются на базе реального пула СУБД PostgreSQL с автоматическим накатом схемы встроенных миграций с помощью фикстуры **[BasePostgresTestSuite](./internal/repository/postgres/suite_test.go)**. Это гарантирует 100% проверку:
-* Атомарности ACID-транзакций при одновременном начислении кэшбека и изменении статусов ([internal/repository/postgres/order_accrual_test.go](./internal/repository/postgres/order_accrual_test.go)).
-* Корректности работы составных B-Tree индексов и сортировки исторических данных СУБД ([internal/repository/postgres/user_test.go](./internal/repository/postgres/user_test.go)).
-* Аппаратных рубежей защиты целостности данных (`CHECK CONSTRAINT` и ограничений уникальности `unique_violation`).
+1. **Unit-тестирование (Слой Services & DTO):** Бизнес-логика, криптография и валидация моделей полностью изолированы и покрыты модульными тестами с автоматической генерацией мок-интерфейсов (`mockgen`/`mockery`). Примеры: [internal/handler/balance_test.go](./internal/handler/balance_test.go), [internal/handler/order_test.go](./internal/handler/order_test.go).
+2. **Интеграционное тестирование API (Слой Router & Middleware):** Сквозная проверка сетевого периметра реализована в модуле [internal/router/http_server_test.go](./internal/router/http_server_test.go). С помощью встроенных механизмов `net/http/httptest` тестируется вся цепочка прохождения HTTP-пакета (маршруты, gzip-сжатие, авторизационные middleware, DoS-лимитеры).
+3. **Интеграционное тестирование СУБД (Слой Postgres DAL + Testcontainers):** Реализовано на базе продвинутых тестовых сьютов (`testify/suite`) с использованием фикстуры **[BasePostgresTestSuite](./internal/repository/postgres/suite_test.go)**. 
+
+### 🛸 Инфраструктурная магия Testcontainers-Go
+DAL-тесты не требуют ручного развертывания локальной базы данных или внешних зависимостей. При запуске тестов фикстура `BasePostgresTestSuite` автоматически:
+*   Через программное управление Docker-демоном скачивает и запускает изолированный контейнер `postgres:16-alpine` в изолированном сетевом контуре.
+*   Применяет механизм **Retry-подключений** (10 попыток с задержкой) для защиты от EOF-сбоев сетевого стека виртуализации (актуально при запуске в Docker Desktop на Windows / macOS).
+*   Автоматически накатывает встроенные боевые [SQL-миграции](./internal/repository/postgres/migrations/).
+*   **Изолирует тест-кейсы:** Перед каждым тестом вызывается метод `TearDownTest()`, который выполняет быструю атомарную очистку таблиц через `TRUNCATE users CASCADE`, гарантируя отсутствие загрязнения данных (Data Contamination) между проверками.
+*   **Утилизирует окружение:** По завершении сьюта метод `Terminate()` полностью тушит и удаляет Docker-контейнер, высвобождая ресурсы хост-системы.
+
+Проверяется атомарность ACID-транзакций при одновременном начислении кэшбека ([internal/repository/postgres/order_accrual_test.go](./internal/repository/postgres/order_accrual_test.go)) и корректность индексов ([internal/repository/postgres/user_test.go](./internal/repository/postgres/user_test.go)).
 
 ### Запуск полного цикла тестирования:
+Убедитесь, что на вашей локальной машине или в CI/CD агенте запущен **Docker-демон**, и выполните:
 ```bash
-# 1. Генерация свежих мок-объектов
+# 1. Автоматическая генерация свежих мок-объектов
 go generate ./...
 
-# 2. Запуск unit и интеграционных тестов с детектором состояния гонки (Race Detector)
+# 2. Запуск unit и всех уровней интеграционных тестов с включенным детектором гонок (Race Detector)
 go test -v -race ./...
 ```
 
