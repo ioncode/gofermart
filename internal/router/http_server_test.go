@@ -2,6 +2,7 @@ package router_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -113,4 +114,76 @@ func TestServerRouterAndMiddleware_WithMocks(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, rec.Code)
 	})
+
+	t.Run("Gzip_CompressResponse", func(t *testing.T) {
+		mockHandler := new(mocks.MockServerHandler)
+
+		mockHandler.On("AuthMiddleware", mock.Anything).Return(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mockHandler.Register(w, r)
+		}))
+
+		mockHandler.On("Register", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			w := args.Get(0).(http.ResponseWriter)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		})
+
+		srv := router.NewServer(":8080", mockHandler, logger)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/user/register", bytes.NewReader([]byte(`{"login":"test","password":"pwd"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept-Encoding", "gzip")
+		rec := httptest.NewRecorder()
+
+		srv.GetHandler().ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
+
+		reader, err := gzip.NewReader(rec.Body)
+		assert.NoError(t, err)
+		defer reader.Close()
+
+		unzippedBody, err := io.ReadAll(reader)
+		assert.NoError(t, err)
+		assert.JSONEq(t, `{"status":"ok"}`, string(unzippedBody))
+
+	})
+
+	t.Run("Gzip_DecompressRequest", func(t *testing.T) {
+		mockHandler := new(mocks.MockServerHandler)
+
+		mockHandler.On("AuthMiddleware", mock.Anything).Return(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mockHandler.Register(w, r)
+		}))
+
+		mockHandler.On("Register", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+			w := args.Get(0).(http.ResponseWriter)
+			r := args.Get(1).(*http.Request)
+			body, _ := io.ReadAll(r.Body)
+			if string(body) == `{"login":"test","password":"pwd"}` {
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		})
+
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		_, _ = zw.Write([]byte(`{"login":"test","password":"pwd"}`))
+		_ = zw.Close()
+
+		srv := router.NewServer(":8080", mockHandler, logger)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/user/register", &buf)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Encoding", "gzip")
+		rec := httptest.NewRecorder()
+
+		srv.GetHandler().ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
 }

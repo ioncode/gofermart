@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/ioncode/gofermart/internal/handler"
+	"github.com/ioncode/gofermart/pkg/gzip"
 	"github.com/ioncode/ulog/v3"
 )
 
@@ -33,7 +34,7 @@ func NewServer(addr string, srvHandler ServerHandler, logger ulog.Logger) *Serve
 	r.Use(ulog.TraceIDMiddleware)
 	r.Use(ulog.RecoveryMiddleware(logger))
 	r.Use(ulog.LoggingMiddleware(logger))
-	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(gzip.Middleware)
 
 	// DoS-защита для чтения через helper
 	r.Use(MaxBytesMiddleware(handler.MaxBodySize))
