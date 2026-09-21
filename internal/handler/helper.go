@@ -45,30 +45,28 @@ func ReadBodyOptimized(w http.ResponseWriter, r *http.Request, processor func(pa
 	n, err := io.ReadFull(r.Body, buf)
 
 	if err != nil {
-		// 1. Обработка ошибки переполнения от http.MaxBytesReader (Middleware)
-		// ОПТИМИЗАЦИЯ: Проверяем ошибку MaxBytesReader по ее текстовому маркеру.
-		// Это полностью убирает вызов errors.As, который приводил к аллокации 8 байт в куче.
-		if err.Error() == "http: request body too large" {
-			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge) // 413
-			return false
-		}
-
-		// 2. Обработка успешного окончания короткого потока.
-		// В проде (под MaxBytesReader) и в тестах при успешном чтении короткого JSON
-		// io.ReadFull ВСЕГДА возвращает io.ErrUnexpectedEOF, потому что буфер 4КБ не заполнился встык.
+		// 1. Успешное окончание короткого JSON-потока (Самый частый кейс)
 		if errors.Is(err, io.ErrUnexpectedEOF) {
 			if n == 0 {
-				http.Error(w, "Request body is empty", http.StatusBadRequest) // 400
+				http.Error(w, "Request body is empty", http.StatusBadRequest)
 				return false
 			}
-			// Если n > 0 — это полностью валидные данные, сбрасываем ошибку и идем дальше!
-			err = nil
+			err = nil // Сбрасываем ошибку, данные валидны, идем к процессору!
+
+			// 2. Чистый EOF означает, что тело запроса было изначально пустым
 		} else if errors.Is(err, io.EOF) {
-			// Чистый io.EOF от io.ReadFull означает, что в потоке было СТРОГО 0 байт с самого начала
-			http.Error(w, "Request body is empty", http.StatusBadRequest) // 400
+			http.Error(w, "Request body is empty", http.StatusBadRequest)
 			return false
+
+			// 3. Сюда попадают только реальные сетевые аномалии (таймауты, переполнения)
 		} else {
-			// Любая реальная сетевая ошибка (таймаут, жесткий обрыв связи)
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge) // 413
+				return false
+			}
+
+			// Любая другая непредвиденная сетевая ошибка (например, жесткий обрыв связи)
 			http.Error(w, "Failed to read request body", http.StatusBadRequest) // 400
 			return false
 		}
