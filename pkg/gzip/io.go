@@ -2,7 +2,6 @@ package gzip
 
 import (
 	"compress/gzip"
-	"fmt"
 	"io"
 	"net/http"
 )
@@ -27,25 +26,26 @@ func (c *CompressWriter) Header() http.Header {
 	return c.w.Header()
 }
 
-// Write лениво выставляет заголовок сжатия и выталкивает чанки данных в сеть.
+// Write лениво выставляет заголовок сжатия и пишет байты напрямую в компрессор.
 func (c *CompressWriter) Write(p []byte) (int, error) {
 	if c.noContent {
 		return c.w.Write(p)
 	}
+
 	if !c.wroteHeader {
 		c.w.Header().Set("Content-Encoding", "gzip")
 		c.wroteHeader = true
 	}
+
 	n, err := c.zw.Write(p)
 	if err != nil {
 		return n, err
 	}
-	if err := c.zw.Flush(); err != nil {
-		return n, fmt.Errorf("gzip flush failed: %w", err)
-	}
+
 	if f, ok := c.w.(http.Flusher); ok {
 		f.Flush()
 	}
+
 	return n, nil
 }
 
@@ -58,12 +58,15 @@ func (c *CompressWriter) WriteHeader(statusCode int) {
 	c.w.WriteHeader(statusCode)
 }
 
-// Close досылает остатки архива только если хендлер реально писал данные в сокет.
+// Close аккуратно закрывает компрессор, досылая финальные байты архива в сеть.
 func (c *CompressWriter) Close() error {
+	// Предохранитель: если хэндлер ничего не писал (например, статус 200 с пустым телом),
+	// или это пустые статусы 204/304 — просто возвращаем объект в пул без генерации фантомных байт.
 	if !c.wroteHeader || c.noContent {
 		writerPool.Put(c.zw)
 		return nil
 	}
+
 	err := c.zw.Close()
 	writerPool.Put(c.zw)
 	return err
