@@ -33,30 +33,28 @@ func (c *CompressWriter) Write(p []byte) (int, error) {
 	}
 
 	if !c.wroteHeader {
-		c.w.Header().Set("Content-Encoding", "gzip")
-		c.wroteHeader = true
+		c.WriteHeader(http.StatusOK)
 	}
-
-	// n, err := c.zw.Write(p)
-	// if err != nil {
-	// 	return n, err
-	// }
-
-	// if f, ok := c.w.(http.Flusher); ok {
-	// 	f.Flush()
-	// }
-
-	// return n, nil
 
 	return c.zw.Write(p)
 }
 
 // WriteHeader блокирует выставление Content-Encoding для пустых статус-кодов.
 func (c *CompressWriter) WriteHeader(statusCode int) {
-	if statusCode == http.StatusNoContent || statusCode == http.StatusNotModified {
-		c.wroteHeader = true
-		c.noContent = true
+	if c.wroteHeader {
+		return // Предохранитель от двойного вызова
 	}
+
+	if statusCode == http.StatusNoContent || statusCode == http.StatusNotModified {
+		c.noContent = true
+		c.wroteHeader = true
+		c.w.WriteHeader(statusCode)
+		return
+	}
+
+	c.w.Header().Set("Content-Encoding", "gzip")
+	c.wroteHeader = true
+
 	c.w.WriteHeader(statusCode)
 }
 
