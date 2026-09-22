@@ -16,6 +16,7 @@ import (
 	"github.com/ioncode/gofermart/internal/repository"
 	"github.com/ioncode/ulog/v3"
 	"github.com/shopspring/decimal"
+	"golang.org/x/sync/errgroup"
 )
 
 // AccrualResponse описывает структуру JSON-ответа, получаемого
@@ -71,17 +72,23 @@ func NewAccrualWorker(
 
 // Start запускает бесконечный цикл обработки заказов. Метод слушает сигналы отмены контекста,
 // входящие события из канала мгновенной обработки и периодические тики для подстраховки застрявших заказов.
-// Должен запускаться в отдельной горутине: `go worker.Start(rootCtx, 5*time.Second, &wg)`.
-func (w *AccrualWorker) Start(ctx context.Context, interval time.Duration, wg *sync.WaitGroup) {
+// Должен запускаться в отдельной горутине: `go worker.Start(rootCtx, 5*time.Second)`.
+func (w *AccrualWorker) Start(ctx context.Context, interval time.Duration) error {
 	w.logger.Info("Фоновый событийный воркер расчета баллов запущен")
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	// Инициализируем группу с привязкой к контексту приложения
+	g, ctx := errgroup.WithContext(ctx)
+	// Жестко ограничиваем конкурентность: этот параметр зависит от ограничений на стороне внешнего сервиса с одной стороны и от ресурсов для обработки результатов выполнения функции processSingleOrder (персистирования в репозиторий)
+	// не больше пула подключений к pg , по бенчмарками оптимальный варинат - 40.
+	g.SetLimit(40)
 
 	for {
 		select {
 		case <-ctx.Done():
 			w.logger.Info("Фоновый воркер останавливает работу (получен сигнал отмены контекста)")
-			return
+			return g.Wait()
 
 		case <-ticker.C:
 			w.processUnprocessedOrders(ctx)
@@ -89,14 +96,14 @@ func (w *AccrualWorker) Start(ctx context.Context, interval time.Duration, wg *s
 		case order, ok := <-w.OrderChan:
 			if !ok {
 				w.logger.Error("Канал заказов был закрыт", nil)
-				return
+				return g.Wait()
 			}
-			// Увеличиваем счетчик для вложенной горутины
-			wg.Add(1)
-			go func(ord domain.Order) {
-				defer wg.Done() // Уменьшаем счетчик, когда одиночный заказ полностью обработан
+			// Копируем переменную для безопасного использования внутри замыкания горутины
+			ord := order
+			g.Go(func() error {
 				w.processSingleOrder(ctx, ord)
-			}(order)
+				return nil
+			})
 		}
 	}
 }
