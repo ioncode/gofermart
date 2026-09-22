@@ -1,0 +1,56 @@
+﻿goos: windows
+goarch: amd64
+pkg: github.com/ioncode/gofermart/internal/handler
+cpu: AMD Ryzen 5 5600X 6-Core Processor             
+BenchmarkStage4_WriteBalance_Optimized-12    	 1917085	       576.1 ns/op	     168 B/op	      11 allocs/op
+BenchmarkStage4_WriteBalance_Optimized-12    	 2246299	       528.3 ns/op	     168 B/op	      11 allocs/op
+BenchmarkStage4_WriteBalance_Optimized-12    	 2320107	       506.5 ns/op	     168 B/op	      11 allocs/op
+BenchmarkStage4_WriteBalance_Optimized-12    	 2380072	       501.5 ns/op	     168 B/op	      11 allocs/op
+BenchmarkStage4_WriteBalance_Optimized-12    	 2264553	       501.5 ns/op	     168 B/op	      11 allocs/op
+BenchmarkStage4_WriteBalance_Optimized-12    	 2417984	       507.4 ns/op	     168 B/op	      11 allocs/op
+BenchmarkStage4_WriteBalance_Optimized-12    	 2206926	       503.4 ns/op	     168 B/op	      11 allocs/op
+BenchmarkStage4_WriteBalance_Optimized-12    	 2345212	       518.6 ns/op	     168 B/op	      11 allocs/op
+BenchmarkStage4_WriteBalance_Optimized-12    	 2406363	       494.8 ns/op	     168 B/op	      11 allocs/op
+BenchmarkStage4_WriteBalance_Optimized-12    	 2428761	       501.5 ns/op	     168 B/op	      11 allocs/op
+BenchmarkStage1_ReadBody-12                  	 8479785	       128.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStage1_ReadBody-12                  	 9015852	       124.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStage1_ReadBody-12                  	 9481002	       129.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStage1_ReadBody-12                  	 9600644	       124.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStage1_ReadBody-12                  	 9765981	       125.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStage1_ReadBody-12                  	 9411092	       125.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStage1_ReadBody-12                  	 9671560	       123.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStage1_ReadBody-12                  	 9794854	       129.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStage1_ReadBody-12                  	 9723889	       124.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStage1_ReadBody-12                  	 9677466	       123.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStage2_Unmarshal-12                 	10006378	       123.8 ns/op	      96 B/op	       1 allocs/op
+BenchmarkStage2_Unmarshal-12                 	10296548	       121.6 ns/op	      96 B/op	       1 allocs/op
+BenchmarkStage2_Unmarshal-12                 	10103127	       118.5 ns/op	      96 B/op	       1 allocs/op
+BenchmarkStage2_Unmarshal-12                 	10090545	       118.9 ns/op	      96 B/op	       1 allocs/op
+BenchmarkStage2_Unmarshal-12                 	10175553	       121.8 ns/op	      96 B/op	       1 allocs/op
+BenchmarkStage2_Unmarshal-12                 	10051635	       119.7 ns/op	      96 B/op	       1 allocs/op
+BenchmarkStage2_Unmarshal-12                 	10026980	       123.3 ns/op	      96 B/op	       1 allocs/op
+BenchmarkStage2_Unmarshal-12                 	10116814	       121.8 ns/op	      96 B/op	       1 allocs/op
+BenchmarkStage2_Unmarshal-12                 	10262190	       120.7 ns/op	      96 B/op	       1 allocs/op
+BenchmarkStage2_Unmarshal-12                 	 9796917	       118.4 ns/op	      96 B/op	       1 allocs/op
+BenchmarkStage3_WriteJSON_Optimized-12       	 1396939	       868.1 ns/op	     152 B/op	       9 allocs/op
+BenchmarkStage3_WriteJSON_Optimized-12       	 1370163	       883.1 ns/op	     152 B/op	       9 allocs/op
+BenchmarkStage3_WriteJSON_Optimized-12       	 1400748	       906.1 ns/op	     152 B/op	       9 allocs/op
+BenchmarkStage3_WriteJSON_Optimized-12       	 1392836	       928.6 ns/op	     152 B/op	       9 allocs/op
+BenchmarkStage3_WriteJSON_Optimized-12       	 1294638	       863.3 ns/op	     152 B/op	       9 allocs/op
+BenchmarkStage3_WriteJSON_Optimized-12       	 1415935	       864.8 ns/op	     152 B/op	       9 allocs/op
+BenchmarkStage3_WriteJSON_Optimized-12       	 1377480	       858.6 ns/op	     152 B/op	       9 allocs/op
+BenchmarkStage3_WriteJSON_Optimized-12       	 1406029	       910.7 ns/op	     152 B/op	       9 allocs/op
+BenchmarkStage3_WriteJSON_Optimized-12       	 1391434	       867.9 ns/op	     152 B/op	       9 allocs/op
+BenchmarkStage3_WriteJSON_Optimized-12       	 1401498	       856.0 ns/op	     152 B/op	       9 allocs/op
+BenchmarkStage3_WriteJSON_Marshalling-12     	 1360617	       909.1 ns/op	     376 B/op	      10 allocs/op
+BenchmarkStage3_WriteJSON_Marshalling-12     	 1367565	       940.4 ns/op	     376 B/op	      10 allocs/op
+BenchmarkStage3_WriteJSON_Marshalling-12     	 1000000	      1108 ns/op	     376 B/op	      10 allocs/op
+BenchmarkStage3_WriteJSON_Marshalling-12     	 1366860	       903.2 ns/op	     376 B/op	      10 allocs/op
+BenchmarkStage3_WriteJSON_Marshalling-12     	 1386674	       868.5 ns/op	     376 B/op	      10 allocs/op
+BenchmarkStage3_WriteJSON_Marshalling-12     	 1375767	       888.3 ns/op	     376 B/op	      10 allocs/op
+BenchmarkStage3_WriteJSON_Marshalling-12     	 1383031	       899.7 ns/op	     376 B/op	      10 allocs/op
+BenchmarkStage3_WriteJSON_Marshalling-12     	 1000000	      1128 ns/op	     376 B/op	      10 allocs/op
+BenchmarkStage3_WriteJSON_Marshalling-12     	 1000000	      1083 ns/op	     376 B/op	      10 allocs/op
+BenchmarkStage3_WriteJSON_Marshalling-12     	 1323984	       887.1 ns/op	     376 B/op	      10 allocs/op
+PASS
+ok  	github.com/ioncode/gofermart/internal/handler	84.157s
