@@ -3,7 +3,7 @@ package worker
 import (
 	"context"
 	"testing"
-	"testing/synctest" // Экспериментальный пакет из Go 1.24
+	"testing/synctest"
 	"time"
 
 	"github.com/ioncode/ulog/v3/adapters/uzerolog"
@@ -63,8 +63,6 @@ func TestAccrualWorker_HandleBackoff_CancelInterrupt(t *testing.T) {
 		endVirtualTime := time.Now()
 		elapsedVirtualTime := endVirtualTime.Sub(startVirtualTime)
 
-		// Проверяем, что воркер НЕ спал оставшиеся 58 секунд,
-		// а мгновенно отреагировал на отмену контекста!
 		assert.True(t, elapsedVirtualTime < backoffDuration, "Воркер должен был проснуться раньше при отмене ctx")
 	})
 }
