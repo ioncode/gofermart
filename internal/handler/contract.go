@@ -102,5 +102,10 @@ func (r *WithdrawRequest) Sanitize() {
 // Validate проверяет валидность финансовой транзакции.
 func (r *WithdrawRequest) Validate() bool {
 	r.Sanitize()
+
+	// Защита от фрода с дробными копейками (Exponent < -2 означает > 2 знаков после запятой)
+	if r.Sum.Exponent() < -2 {
+		return false
+	}
 	return r.Order != "" && !r.Sum.IsNegative() && !r.Sum.IsZero()
 }
