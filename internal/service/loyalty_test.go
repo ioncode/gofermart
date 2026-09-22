@@ -163,11 +163,6 @@ func TestLoyaltyService_UploadOrder(t *testing.T) {
 	orderID := "12345678903" // Валидный номер по алгоритму Луна
 
 	t.Run("Success upload new order", func(t *testing.T) {
-		// Ожидаем, что репозиторий сначала проверит заказ и вернет ошибку, что он НЕ найден
-		mockOrderRepo.EXPECT().
-			GetOrder(ctx, orderID).
-			Return(domain.Order{}, repository.ErrOrderNotFound)
-
 		// Ожидаем, что репозиторий успешно создаст новый заказ со статусом NEW
 		mockOrderRepo.EXPECT().
 			CreateOrder(ctx, orderID, userID, "NEW").
@@ -190,7 +185,10 @@ func TestLoyaltyService_UploadOrder(t *testing.T) {
 	t.Run("Conflict: order already uploaded by SAME user", func(t *testing.T) {
 		existingOrder := domain.Order{ID: orderID, UserID: userID, Status: "NEW"}
 
-		// База данных возвращает существующий заказ того же пользователя
+		mockOrderRepo.EXPECT().
+			CreateOrder(ctx, orderID, userID, "NEW").
+			Return(repository.ErrOrderAlreadyExists)
+
 		mockOrderRepo.EXPECT().
 			GetOrder(ctx, orderID).
 			Return(existingOrder, nil)
@@ -203,7 +201,10 @@ func TestLoyaltyService_UploadOrder(t *testing.T) {
 		anotherUserID := "user-999"
 		existingOrder := domain.Order{ID: orderID, UserID: anotherUserID, Status: "NEW"}
 
-		// База данных возвращает существующий заказ другого пользователя
+		mockOrderRepo.EXPECT().
+			CreateOrder(ctx, orderID, userID, "NEW").
+			Return(repository.ErrOrderAlreadyExists)
+
 		mockOrderRepo.EXPECT().
 			GetOrder(ctx, orderID).
 			Return(existingOrder, nil)

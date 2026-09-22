@@ -17,7 +17,7 @@ var (
 	ErrOrderNotFound     = errors.New("order not found")
 	ErrInsufficientFunds = errors.New("insufficient funds on user balance")
 	// ошибка уникальности orderId на уровне репозитория для снижения 500 клиенту при параллельных запросах
-	ErrOrderAlreadyExists = errors.New("order allready exists")
+	ErrOrderAlreadyExists = errors.New("order already exists")
 )
 
 // UserRepository описывает методы для работы с таблицей пользователей

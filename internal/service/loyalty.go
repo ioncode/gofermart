@@ -174,36 +174,34 @@ func (s *LoyaltyService) UploadOrder(ctx context.Context, userID string, orderID
 	)
 	log.Debug("Попытка загрузки нового номера заказа")
 
-	// 1. Проверяем существование заказа в базе данных через репозиторий
-	existingOrder, err := s.orderRepo.GetOrder(ctx, orderID)
+	// 1. Пытаемся создать заказ атомарно.
+	// при конфликте UNIQUE он вернет ErrOrderAlreadyExists
+	err := s.orderRepo.CreateOrder(ctx, orderID, userID, "NEW")
+
 	if err != nil {
-		// Если это не ошибка отсутствия записи, значит произошел системный сбой БД
-		if !errors.Is(err, repository.ErrOrderNotFound) {
-			log.Error("Системная ошибка при проверке существования заказа в БД", err)
-			return fmt.Errorf("failed to check order existence: %w", err)
-		}
-		// Если err == repository.ErrOrderNotFound, продолжаем выполнение: заказ абсолютно новый
-	} else {
-		// Заказ уже существует в системе. Проверяем, кто его владелец:
-		if existingOrder.UserID == userID {
-			log.Info("Заказ уже был загружен этим же пользователем ранее")
-			return ErrOrderUploadedBySameUser
+		// Обработка конфликта, если заказ уже существует в СУБД
+		if errors.Is(err, repository.ErrOrderAlreadyExists) {
+			existingOrder, getErr := s.orderRepo.GetOrder(ctx, orderID)
+			if getErr != nil {
+				return fmt.Errorf("failed to fetch existing order on conflict: %w", getErr)
+			}
+
+			if existingOrder.UserID == userID {
+				log.Info("Заказ уже был загружен этим же пользователем ранее")
+				return ErrOrderUploadedBySameUser // Хендлер превратит в 200 OK
+			}
+
+			log.Info("Конфликт: заказ уже загружен другим пользователем")
+			return ErrOrderUploadedByOtherUser // Хендлер превратит в 409 Conflict
 		}
 
-		log.Info("Конфликт: заказ уже загружен другим пользователем")
-		return ErrOrderUploadedByOtherUser
-	}
-
-	// 2. Сохраняем новый заказ в PostgreSQL со статусом "NEW"
-	// Первоначальный баланс начисления равен 0, статус обработки — NEW
-	err = s.orderRepo.CreateOrder(ctx, orderID, userID, "NEW")
-	if err != nil {
-		log.Error("Не удалось сохранить новый заказ в базу данных", err)
+		log.Error("Системная ошибка при создании заказа в базе данных", err)
 		return fmt.Errorf("failed to save new order: %w", err)
 	}
+
 	log.Info("Новый заказ успешно сохранен в БД и принят в обработку")
 
-	// 3. Формируем доменную модель для отправки в событийный воркер
+	// 2. Формируем доменную модель для отправки в событийный воркер
 	newOrder := domain.Order{
 		ID:         orderID,
 		UserID:     userID,
@@ -211,7 +209,7 @@ func (s *LoyaltyService) UploadOrder(ctx context.Context, userID string, orderID
 		UploadedAt: time.Now(),
 	}
 
-	// 4. МГНОВЕННАЯ ОТПРАВКА: Пишем в канал воркера через неблокирующий select.
+	// 3. МГНОВЕННАЯ ОТПРАВКА: Пишем в канал воркера через неблокирующий select.
 	// Если буфер канала переполнен (например, при DDoS или высокой нагрузке),
 	// мы не подвешиваем горутину HTTP-запроса — пользователь мгновенно получит 202 Accepted.
 	// Заказ подхватится плановым тикером воркера из БД чуть позже.
