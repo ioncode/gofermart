@@ -1,9 +1,9 @@
 package handler
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/ioncode/gofermart/internal/service"
 	"github.com/ioncode/gofermart/pkg/luhn"
@@ -19,8 +19,17 @@ func (h *UserHandler) UploadOrder(w http.ResponseWriter, r *http.Request) {
 
 	var orderID string
 	ok = ReadBodyOptimized(w, r, func(payload []byte) bool {
-		orderID = strings.TrimSpace(string(payload))
-		return true // Чтение прошло успешно, бизнес-логику выполняем дальше по хендлеру
+		// Чистим пробельные символы прямо в срезе байт без аллокаций
+		cleanedPayload := bytes.TrimSpace(payload)
+
+		if len(cleanedPayload) > 0 {
+			// выделяем строку только если срез байт после обрезки мусора содержит полезную нагрузку (не пустой)
+			orderID = string(cleanedPayload)
+			return true
+		}
+
+		// для невалидного запроса сразу возвращаем ошибку
+		return false
 	})
 	if !ok {
 		return // Ошибка уже отправлена внутри ReadBodyOptimized

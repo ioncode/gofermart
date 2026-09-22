@@ -97,10 +97,9 @@ func (s *Server) Stop(ctx context.Context) error {
 func MaxBytesMiddleware(maxSize int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Оборачиваем оригинальный r.Body в лимитер.
-			// Объект MaxBytesReader выделится в куче ОДИН РАЗ на уровне роутера,
-			// что полностью изолирует наш горячий helper.go от аллокаций.
-			r.Body = http.MaxBytesReader(w, r.Body, maxSize)
+			if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+				r.Body = http.MaxBytesReader(w, r.Body, maxSize)
+			}
 			next.ServeHTTP(w, r)
 		})
 	}

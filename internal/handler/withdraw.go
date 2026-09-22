@@ -27,6 +27,7 @@ import (
 //   - 422 Unprocessable Entity: передан некорректный номер заказа (не прошел проверку алгоритма Луна).
 //   - 402 Payment Required: на счету пользователя недостаточно средств для списания.
 //   - 500 Internal Server Error: непредвиденная ошибка на уровне бизнес-логики или базы данных.
+//   - 409 Conflict: ошибка списания в счет нового заказа с неуникальным номером
 func (h *UserHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 	userID, ok := getUserIDFromContext(r.Context())
 	if !ok {
@@ -66,6 +67,13 @@ func (h *UserHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, repository.ErrInsufficientFunds) {
 			http.Error(w, "Insufficient funds", http.StatusPaymentRequired) // 402
+			return
+		}
+
+		// Перехватываем попытку повторного использования номера заказа для списания
+		// Возвращаем статус 409 Conflict вместо системной ошибки 500 Internal Server Error
+		if errors.Is(err, repository.ErrOrderAlreadyExists) {
+			http.Error(w, "Withdrawal for this order already exists", http.StatusConflict) // 409
 			return
 		}
 		http.Error(w, "Internal server error", http.StatusInternalServerError) // 500

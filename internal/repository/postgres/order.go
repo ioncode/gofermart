@@ -8,6 +8,7 @@ import (
 	"github.com/ioncode/gofermart/internal/domain"
 	"github.com/ioncode/gofermart/internal/repository"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 )
@@ -62,6 +63,11 @@ func (r *OrderRepository) CreateOrder(ctx context.Context, orderID string, userI
 
 	_, err := r.db.Exec(ctx, query, orderID, userID, status)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		// Код 23505 — Нарушение уникальности (заказ с таким ID уже есть)
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return repository.ErrOrderAlreadyExists
+		}
 		return fmt.Errorf("postgres: failed to insert new order: %w", err)
 	}
 

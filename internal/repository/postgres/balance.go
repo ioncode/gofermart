@@ -71,6 +71,11 @@ func (r *BalanceRepository) WithdrawPoints(ctx context.Context, userID string, o
 	withdrawQuery := `INSERT INTO withdrawals (user_id, order_id, amount) VALUES ($1, $2, $3)`
 	_, err = tx.Exec(ctx, withdrawQuery, userID, orderID, amount)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		// Код 23505 — Нарушение уникальности (списание по этому заказу уже есть)
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return repository.ErrOrderAlreadyExists
+		}
 		return fmt.Errorf("postgres: failed to record withdrawal: %w", err)
 	}
 
