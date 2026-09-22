@@ -71,8 +71,8 @@ func NewAccrualWorker(
 
 // Start запускает бесконечный цикл обработки заказов. Метод слушает сигналы отмены контекста,
 // входящие события из канала мгновенной обработки и периодические тики для подстраховки застрявших заказов.
-// Должен запускаться в отдельной горутине: `go worker.Start(rootCtx, 5*time.Second)`.
-func (w *AccrualWorker) Start(ctx context.Context, interval time.Duration) {
+// Должен запускаться в отдельной горутине: `go worker.Start(rootCtx, 5*time.Second, &wg)`.
+func (w *AccrualWorker) Start(ctx context.Context, interval time.Duration, wg *sync.WaitGroup) {
 	w.logger.Info("Фоновый событийный воркер расчета баллов запущен")
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -91,7 +91,12 @@ func (w *AccrualWorker) Start(ctx context.Context, interval time.Duration) {
 				w.logger.Error("Канал заказов был закрыт", nil)
 				return
 			}
-			w.processSingleOrder(ctx, order)
+			// Увеличиваем счетчик для вложенной горутины
+			wg.Add(1)
+			go func(ord domain.Order) {
+				defer wg.Done() // Уменьшаем счетчик, когда одиночный заказ полностью обработан
+				w.processSingleOrder(ctx, ord)
+			}(order)
 		}
 	}
 }
