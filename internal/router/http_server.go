@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -76,18 +75,27 @@ func NewServer(addr string, srvHandler ServerHandler, logger ulog.Logger) *Serve
 	}
 }
 
-// Start запускает сервер в текущей горутине
-func (s *Server) Start() {
+// Start запускает сервер и возвращает ошибку.
+func (s *Server) Start() error {
 	s.logger.Info("Gophermart API сервер запущен", ulog.String("Адрес сервера", s.httpServer.Addr))
-	if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+
+	if err := s.httpServer.ListenAndServe(); err != nil {
+		// Ошибку штатного закрытия сервера (http.ErrServerClosed) мы не считаем сбоем,
+		// возвращаем nil, чтобы errgroup не паниковала при graceful shutdown.
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+
 		s.logger.Error("Критическая ошибка при работе сервера", err)
-		os.Exit(1)
+		return err
 	}
+
+	return nil
 }
 
 // Stop выполняет Graceful Shutdown с использованием переданного контекста таймаута
 func (s *Server) Stop(ctx context.Context) error {
-	s.logger.Info("Завершение и обработка оставшихся запросов...")
+	s.logger.Info("Завершение работы веб-сервера и обработка оставшихся запросов...")
 	return s.httpServer.Shutdown(ctx)
 }
 

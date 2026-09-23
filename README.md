@@ -15,9 +15,9 @@
 *   **Безопасность сессий:** Авторизация реализована через JWT-токены (библиотека `golang-jwt/jwt/v5`) с явной валидацией алгоритма подписи для защиты от уязвимостей типа `alg: none`. На уровне HTTP-кук выставлены флаги безопасности `HttpOnly`, `Secure` и режим `SameSiteLax` внутри [internal/handler/middleware.go](./internal/handler/middleware.go).
 
 ### ⚙️ Слой бизнес-логики и фоновых процессов (Domain & Worker)
-*   **Гибридный событийный воркер (Event-Driven + Polling):** Начисление бонусов обрабатывается асинхронно через буферизированный канал оперативной памяти на 1000 элементов. В качестве fallback-стратегии развернут фоновый тикер, пуллящий промежуточные статусы заказов из базы данных. Подробности в [internal/worker/accrual.go](./internal/worker/accrual.go).
-*   **Отказоустойчивость (Fault Tolerance):** Все итерации воркеров изолированы через механизмы `recover()`, предотвращая падение веб-сервера при паниках.
-*   **Умный воркер (Backoff):** Воркер умеет цивилизованно читать заголовки `Retry-After` от внешних Rate-Limiter'ов системы начислений, динамически переводя горутины в управляемый сон с поддержкой плавного завершения (`Graceful Shutdown`) внутри [cmd/gophermart/main.go](./cmd/gophermart/main.go).
+*   **Гибридный декомпозированный воркер (Event-Driven + Polling):** Асинхронная обработка начислений через буферизированный канал с разделением на изолированные компоненты (`client.go`, `throttler.go`, `service.go`, `worker.go`). Подробнее см. в [internal/worker/accrual/](internal/worker/accrual/).
+*   **Защита от CPU Burn и лавины 429 (Backpressure):** Динамическое переключение канала в `nil` и превентивное сглаживание нагрузки (Token Bucket). Настройка в [internal/worker/accrual/worker.go](internal/worker/accrual/worker.go).
+*   **Финтех-консистентность и Fault Tolerance:** Изоляция паник через `recover()` и защита транзакций. Описание контура в [internal/worker/accrual/service.go](internal/worker/accrual/service.go).
 
 ### 💾 Слой хранения данных (Database Layer)
 *   **Нативный бинарный драйвер `pgx/v5`:** Приложение полностью отказалось от ORM в пользу прямого бинарного протокола взаимодействия с PostgreSQL, что исключает накладные расходы на парсинг SQL-строк. Инициализация пула описана в [internal/repository/postgres/postgres.go](./internal/repository/postgres/postgres.go).
