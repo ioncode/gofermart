@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,7 +23,7 @@ import (
 	"github.com/ioncode/gofermart/internal/repository/postgres"
 	"github.com/ioncode/gofermart/internal/router"
 	"github.com/ioncode/gofermart/internal/service"
-	"github.com/ioncode/gofermart/internal/worker"
+	"github.com/ioncode/gofermart/internal/worker/accrual"
 	"github.com/ioncode/ulog/v3"
 	"github.com/ioncode/ulog/v3/adapters/uzerolog"
 	"github.com/rs/zerolog"
@@ -37,11 +38,14 @@ func main() {
 	// избавляя клиентские приложения от необходимости парсить строки в кавычках.
 	decimal.MarshalJSONWithoutQuotes = true
 
+	const RFC3339Milli = "2006-01-02T15:04:05.000Z07:00"
+
 	// Инициализация слоя структурированного логирования для отслеживания инцидентов.
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        os.Stdout,
-		TimeFormat: time.RFC3339,
+		TimeFormat: RFC3339Milli,
 	}
+	zerolog.TimeFieldFormat = RFC3339Milli
 	logWriter := consoleWriter
 	nativeZerolog := zerolog.New(logWriter).With().Timestamp().Caller().Logger()
 	logger := uzerolog.NewZerologAdapter(nativeZerolog)
@@ -79,7 +83,7 @@ func main() {
 	accrualRepo := postgres.NewOrderAccrualRepository(pool)
 
 	// Инициализация и запуск фонового распределителя задач обработки заказов.
-	accrualWorker := worker.NewAccrualWorker(orderRepo, accrualRepo, cfg.AccrualSystemAddress, logger)
+	accrualWorker := accrual.NewAccrualWorker(orderRepo, accrualRepo, cfg.AccrualSystemAddress, logger)
 
 	// Инициализация доменного сервисного слоя бизнес-логики приложения.
 	loyaltySvc := service.NewLoyaltyService(
@@ -97,48 +101,51 @@ func main() {
 	userHandler := handler.NewUserHandler(loyaltySvc, false, logger)
 	server := router.NewServer(cfg.RunAddress, userHandler, logger)
 
-	// Асинхронный запуск прослушивания HTTP-порта в выделенной горутине.
-	go server.Start()
-
 	// Перехват системных сигналов операционной системы для организации плавного закрытия.
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Запуск фонового планировщика подстраховки воркера с циклом опроса в 5 секунд.
-	// для эффективного использования ресурсов обработчики канала вызываются асинхронно в отдельных горутинах под контролем eg
+	// Инициализируем errgroup для управления жизненным циклом фоновых процессов
+	eg, groupCtx := errgroup.WithContext(rootCtx)
 
-	var eg errgroup.Group
 	eg.Go(func() error {
-		return accrualWorker.Start(rootCtx, 5*time.Second)
+		return server.Start()
 	})
 
-	// Блокировка основного потока приложения до получения сигнала SIGTERM/SIGINT.
-	<-rootCtx.Done()
-	logger.Info("Получен системный сигнал завершения. Запускается Graceful Shutdown...")
+	eg.Go(func() error {
+		// Запуск тикера с интервалом подстраховки в 5 секунд
+		if err := accrualWorker.Start(groupCtx, 5*time.Second); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("Критическая ошибка воркера начислений", err)
+			return err
+		}
+		return nil
+	})
 
-	// Деликатная остановка веб-сервера с жестким таймаутом ожидания активных запросов.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Ожидаем прерывания (системный сигнал Ctrl+C или ошибка в любой из горутин errgroup)
+	<-groupCtx.Done()
+	logger.Info("Получен сигнал завершения работы. Инициализация Graceful Shutdown...")
+
+	// ПОСЛЕДОВАТЕЛЬНОСТЬ GRACEFUL SHUTDOWN
+
+	// Шаг А: Мгновенно останавливаем прием новых HTTP-запросов (таймаут 5 сек на закрытие текущих)
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
 
 	if err := server.Stop(shutdownCtx); err != nil {
-		logger.Error("Ошибка при остановке HTTP-сервера", err)
-		os.Exit(1)
-	}
-
-	logger.Info("HTTP-сервер успешно остановлен. Новые запросы больше не поступают. Писатели в канал завершили работу.")
-
-	// Гарантированно закрываем канал передачи событий, останавливая входящий поток задач.
-	close(accrualWorker.OrderChan)
-	logger.Debug("Входящий канал фонового воркера успешно заблокирован")
-
-	logger.Debug("Ожидание завершения работы всех фоновых горутин воркера...")
-
-	// Ожидаем плавного закрытия самого воркера и всех его внутренних горутин
-	if err := eg.Wait(); err != nil {
-		logger.Error("Фоновый воркер завершился с ошибкой при выходе", err)
+		logger.Error("Ошибка при плановой остановке HTTP-сервера", err)
 	} else {
-		logger.Info("Фоновые процессы воркера успешно завершены. Данные консистентны.")
+		logger.Info("HTTP-сервер успешно остановлен, новые запросы не принимаются")
 	}
 
-	logger.Info("Все системные ресурсы освобождены. Приложение успешно остановлено.")
+	// Шаг Б: Безопасно закрываем входящий канал воркера.
+	// Хендлеры веб-сервера больше ничего туда не пишут, так как сервер уже закрыт.
+	close(accrualWorker.OrderChan)
+	logger.Info("Канал OrderChan закрыт. Ожидаем вычитки оставшихся в буфере задач...")
+
+	// Шаг В: Блокируем главный поток и ждем, пока воркер дочитает канал до дна
+	if err := eg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		logger.Error("Приложение завершилось с ошибкой", err)
+	} else {
+		logger.Info("Все фоновые процессы успешно завершили работу. Данные консистентны.")
+	}
 }
